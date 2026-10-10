@@ -21,8 +21,7 @@ window.mountPlugin = async () => {
       <p id="japanese-glyph-test">日本語の表示確認：設定・認証・骨・直・令・髙・辻</p>
     </main>
   })
-  // The real locale plugin synchronizes document.lang in its bootstrap. This
-  // fixture constructs LocaleRuntime directly and supplies that bootstrap seat.
+  // Supply document.lang synchronization, normally set up by the locale plugin.
   const sync = () => { document.documentElement.lang = locale.getSnapshot().active }
   ctx.effect(() => locale.subscribe(sync))
   const plugin = factories.get('@local/dsh-japanese')(() => { throw new Error('Unexpected external') })

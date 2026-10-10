@@ -1,3 +1,6 @@
 {
-  "meta": { "title": "Japanese", "description": "Japanese UI translations and bundled Noto Sans JP typography" }
+  "meta": {
+    "title": "Japanese",
+    "description": "Japanese UI translations and the Noto Sans JP font"
+  }
 }

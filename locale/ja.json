@@ -1,3 +1,6 @@
 {
-  "meta": { "title": "日本語", "description": "画面の日本語翻訳とNoto Sans JPによる日本語表示" }
+  "meta": {
+    "title": "日本語",
+    "description": "画面の日本語化とNoto Sans JPフォント"
+  }
 }

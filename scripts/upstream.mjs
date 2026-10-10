@@ -41,8 +41,7 @@ export async function compileOfficial(entry, outfile, platform='browser') {
       throw new Error(`No official source entry for ${args.path}`)
     })
   }}
-  // Third-party dependencies may be provided by an existing source checkout;
-  // every @deepseek-ai runtime import is always resolved to the pinned official tree.
+  // Resolve Harness imports from the pinned source; use node_modules for third-party dependencies.
   const nodePaths=[resolve('node_modules'),...(process.env.DSH_TEST_NODE_MODULES?[resolve(process.env.DSH_TEST_NODE_MODULES)]:[])]
   await build({entryPoints:[entry],outfile,bundle:true,platform,format:platform==='node'?'esm':'iife',target:'es2022',jsx:'automatic',nodePaths,plugins:[aliases],loader:{'.css':'text'},logLevel:'silent',tsconfigRaw:{compilerOptions:{experimentalDecorators:true}},...platform==='node'?{banner:{js:"import {createRequire as pluginCheckRequireFactory} from 'node:module'; const require=pluginCheckRequireFactory(import.meta.url);"}}:{}})
 }

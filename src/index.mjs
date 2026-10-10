@@ -1,2 +1,2 @@
-// The UI language and font belong to the Client; the Host contributes no model instructions.
+// Language and fonts are registered by the Client plugin.
 export function apply() {}

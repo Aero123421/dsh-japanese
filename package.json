@@ -16,7 +16,9 @@
     "icon.svg",
     "cordis.patch.yml",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "docs",
+    "upstream.json"
   ],
   "dsh": {
     "bundle": {
