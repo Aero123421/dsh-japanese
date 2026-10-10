@@ -1,5 +1,5 @@
-import dictionaries from '../../../.cache/translations.json'
-import fontCss from '../../../.cache/font-css.mjs'
+import dictionaries from '../.cache/translations.json'
+import fontCss from '../.cache/font-css.mjs'
 
 export const inject = ['locale']
 
