@@ -4,6 +4,8 @@
 
 ## テスト
 
+ソースからビルドするにはNode.js 22.19.0以上が必要です。
+
 ```sh
 npm ci
 npm run build
