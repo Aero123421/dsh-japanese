@@ -11,7 +11,7 @@ test('all pinned official UI keys and placeholders have Japanese translations', 
     for (const [key, text] of Object.entries(english)) {
       assert.equal(typeof japanese[key], 'string', `${namespace}/${key}`)
       assert.deepEqual(placeholders(japanese[key]), placeholders(text), `${namespace}/${key}`)
-      assert.equal(japanese[key].includes('Harnova'), false, `${namespace}/${key}`)
+      assert.doesNotMatch(japanese[key], /harnova/i, `${namespace}/${key}`)
     }
   }
 })

@@ -14,7 +14,7 @@
   "effort.providerDefault": "既定",
   "status.loading": "モデル一覧を更新しています…",
   "error.action": "モデルの操作に失敗しました: {message}",
-  "error.sessionInUse": "このセッションは使用中です。別のDeepSeek Harness（harnova webやDesktopなど）が実行中の可能性があります。ほかのDeepSeek Harnessを終了して再試行してください。",
+  "error.sessionInUse": "このセッションは使用中です。別のDeepSeek Harness（dsh webやDesktopなど）が実行中の可能性があります。ほかのDeepSeek Harnessを終了して再試行してください。",
   "action.reload": "再読み込み",
   "warning.groupLoad": "{name}の読み込みに失敗しました: {message}",
   "search.placeholder": "モデルを検索…",

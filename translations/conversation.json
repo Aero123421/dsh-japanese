@@ -352,7 +352,7 @@
   "queue.remove": "キュー内のメッセージを削除",
   "queue.steer": "キュー内のメッセージで方向を修正",
   "queue.steer.unavailable": "方向の修正はエージェントの実行中のみ可能です",
-  "error.sessionInUse": "このセッションは使用中です。別のDeepSeek Harness（harnova webやDesktopなど）が実行中の可能性があります。ほかのDeepSeek Harnessを終了して再試行してください。",
+  "error.sessionInUse": "このセッションは使用中です。別のDeepSeek Harness（dsh webやDesktopなど）が実行中の可能性があります。ほかのDeepSeek Harnessを終了して再試行してください。",
   "queue.editFailed": "編集に失敗しました。このメッセージはすでに送信を開始した可能性があります。",
   "queue.removeFailed": "削除に失敗しました。このメッセージはすでに送信を開始した可能性があります。",
   "queue.steerFailed": "方向の修正に失敗しました。再試行してください。",
