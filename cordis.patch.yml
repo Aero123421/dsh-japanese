@@ -1,0 +1,3 @@
+- insert:
+    - id: dsh-japanese
+      name: '@local/dsh-japanese'

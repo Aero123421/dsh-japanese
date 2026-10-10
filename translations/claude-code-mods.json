@@ -1,0 +1,6 @@
+{
+  "band": "Claude Codeの拡張",
+  "pressing": "作業中…",
+  "press.failed": "ボタンの操作に失敗しました: {message}",
+  "press.stale": "以前の表示のボタンです。表示を更新しました"
+}

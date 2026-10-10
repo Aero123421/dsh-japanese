@@ -1,0 +1,19 @@
+{
+  "chip.label": "計画",
+  "preview.title": "計画",
+  "preview.document": "計画 · Markdown",
+  "preview.action": "開く",
+  "preview.open": "計画をサイドバーで開く",
+  "preview.full": "計画全体を表示",
+  "preview.openNamed": "計画を開く: {title}",
+  "preview.loading": "計画を読み込んでいます…",
+  "preview.failed": "計画を読み込めませんでした",
+  "preview.invalidAddress": "計画のアドレスが不正です",
+  "preview.historyUnavailable": "セッションの履歴を利用できません",
+  "preview.notFound": "この計画は見つかりませんでした",
+  "preview.unavailable": "計画のプレビューを利用できません",
+  "preview.expired": "この一時プレビューは有効期限が切れました。審査待ちのカードから開き直してください。",
+  "chip.on.aria": "計画モードが有効です。押すと無効になります",
+  "chip.on.title": "計画モードが有効です — クリックで無効化（/plan off）",
+  "chip.exitFailed": "計画モードを終了できませんでした"
+}
