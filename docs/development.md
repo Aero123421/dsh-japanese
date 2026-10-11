@@ -22,6 +22,12 @@ npm run pack:plugin
 
 GitHub Actionsにも同じチェックを設定しています（`.github/workflows/ci.yml`）。翻訳キーの差分が残るとCIは失敗します。配布ファイルとチェックサムは`artifacts`に出力します。
 
+## GitHubからの配布
+
+`main`にはビルド済みの`dist/`を含めます。変更後に`npm run build`を実行し、更新した`dist/`も一緒にコミットしてください。CIで再ビルドし、コミット済みのファイルとの差分が残ると失敗します。インストール時に実行するビルド用スクリプトは追加しません。
+
+版を上げるときは`package.json`、`package-lock.json`、READMEのReleaseリンクを更新し、ビルドと検証を行います。GitHub Releasesにも`npm run pack:plugin`で作った配布ファイルと`SHA256SUMS`を置きます。
+
 ## 公式版への更新
 
 1. `upstream.json`のコミットとバージョンを変更し、古い`.cache/upstream`を退避します。
