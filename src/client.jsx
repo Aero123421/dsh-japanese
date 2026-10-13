@@ -1,3 +1,4 @@
+import { registerUpdatePage } from './update-page.jsx'
 import dictionaries from '../.cache/translations.json'
 import fontCss from '../.cache/font-css.mjs'
 
@@ -13,6 +14,7 @@ html:lang(ja) body {
 `
 
 export function apply(ctx) {
+  ctx.inject(['slots', 'connection'], child => registerUpdatePage(child))
   if (!ctx.locale.getSnapshot().locales.some(locale => locale.id === 'ja')) {
     ctx.effect(() => ctx.locale.addLanguage({ id: 'ja', label: '日本語', fallback: 'en' }), 'dsh-japanese: language')
   }

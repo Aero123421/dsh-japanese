@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-japanese",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "DeepSeek Harnessの日本語言語パックと日本語フォント",
   "type": "module",
   "license": "MIT",
@@ -18,7 +18,8 @@
     "README.md",
     "LICENSE",
     "docs",
-    "upstream.json"
+    "upstream.json",
+    "LICENSE.DeepSeek"
   ],
   "dsh": {
     "bundle": {
@@ -30,6 +31,11 @@
       "inject": [
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-theme"
+      ],
+      "external": [
+        "react",
+        "react/jsx-runtime",
+        "react-dom"
       ]
     }
   },
@@ -38,13 +44,21 @@
   },
   "peerDependencies": {
     "@deepseek-ai/dsh-client-locale": "0.2.1-alpha.2",
-    "@deepseek-ai/dsh-client-ui-theme": "0.2.1-alpha.2"
+    "@deepseek-ai/dsh-client-ui-theme": "0.2.1-alpha.2",
+    "@deepseek-ai/dsh-app-boot": "0.2.1-alpha.2",
+    "@deepseek-ai/dsh-brand": "0.2.1-alpha.2"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-client-locale": {
       "optional": true
     },
     "@deepseek-ai/dsh-client-ui-theme": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-app-boot": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-brand": {
       "optional": true
     }
   },
@@ -53,7 +67,9 @@
     "test": "node --test tests/*.test.mjs",
     "test:browser": "node scripts/browser-check.mjs",
     "pack:plugin": "node scripts/pack.mjs",
-    "sync:contracts": "node scripts/sync-contracts.mjs"
+    "sync:contracts": "node scripts/sync-contracts.mjs",
+    "typecheck": "tsc --noEmit",
+    "test:native": "node scripts/native-check.mjs"
   },
   "devDependencies": {
     "@fontsource-variable/noto-sans-jp": "5.3.0",
@@ -65,6 +81,12 @@
     "react-dom": "18.3.1",
     "typescript": "6.0.3",
     "use-sync-external-store": "^1.7.0",
-    "zustand": "^5.0.15"
+    "zustand": "^5.0.15",
+    "@deepseek-ai/dsh-app-boot": "0.2.1-alpha.2",
+    "@deepseek-ai/dsh-brand": "0.2.1-alpha.2",
+    "@deepseek-ai/dsh-plugin-manager": "0.2.1-alpha.2",
+    "semver": "^7.8.5",
+    "@types/semver": "^7.8.0",
+    "@types/node": "^22.0.0"
   }
 }
