@@ -37,3 +37,19 @@ Windows・macOS・Linuxで同じ書体を使えます。描画はOSやChromium�
 コードと翻訳は[MIT](LICENSE)。Noto Sans JPはSIL Open Font License 1.1で、配布ファイルの`dist/Noto-Sans-JP-OFL.txt`にライセンスを同梱します。
 
 フォント提供元：[@fontsource-variable/noto-sans-jp](https://www.npmjs.com/package/@fontsource-variable/noto-sans-jp)、[Noto Sans JP](https://fonts.google.com/noto/specimen/Noto+Sans+JP)。
+
+## 更新する
+
+「設定 → 日本語パック」に実行版と更新操作を表示します。「更新を確認」は正式Releaseを確認するだけで、「更新する」で選択した版をDSHのplugin managerへ渡します。日本語・英語の文言とDSHのUI部品を使います。表示言語、テキスト・コード用フォント、他の辞書やstyle、システムプロンプトは変更しません。
+
+GitHub導入は明示したReleaseタグへの固定、Release tgz導入はサイズ制限付きで取得・SHA-256照合したファイルを使い、現在の配布経路とbundleのON/OFFを維持します。候補のpackage名・版・bundle宣言・DSH互換性を確認します。ダウンロード済みtgzは`local-dsh-japanese-<導入版>.tgz`の通常ファイルとして配布経路を判定します。この名前だけで既存ファイルの発行者を保証するものではありません。
+
+再起動待ちと実行版の反映確認を区別します。接続が切れた場合は同じ導入を再送せず、操作ID・導入版・実行版を照合します。取得できない結果は「結果が不明」と表示します。機密情報を含まない操作ID・候補版・結果だけをprofileの`.dsh-japanese-update`に保存します。profileが参照する検証済みtgzは保持します。
+
+plugin managerがない構成、読み取り専用、開発ディレクトリ等では手動更新先を表示します。slotsやconnectionがない構成でも辞書とフォントは動作します。このパックをOFFにすると専用画面も消えるため、DSH標準の「設定 → プラグイン」または次のCLIで更新してください。元がOFFの場合は、更新後に標準画面でOFF状態を確認してください。
+
+```sh
+dsh plugin --profile web add -w github:Aero123421/dsh-japanese#v0.2.0
+```
+
+画面からの更新はOFF状態を維持します。CLIの`add`は導入時の有効化を行うため、OFFを維持する必要がある場合はDSH標準のplugin managerから更新してください。

@@ -1,0 +1,6 @@
+.dsh-japanese-update-page { display: flex; flex-direction: column; gap: 12px; max-width: 720px; color: var(--dsw-alias-label-primary); overflow-wrap: anywhere; }
+.dsh-japanese-update-page h2 { margin: 0; font-size: 16px; line-height: 24px; font-weight: 500; }
+.dsh-japanese-update-page p { margin: 0; font-size: 14px; line-height: 22px; }
+.dsh-japanese-update-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.dsh-japanese-update-page .dsh-japanese-update-muted { color: var(--dsw-alias-label-secondary); font-size: 13px; }
+.dsh-japanese-update-notes { white-space: pre-wrap; max-height: 160px; overflow: auto; }

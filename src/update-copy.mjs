@@ -1,0 +1,14 @@
+export const en = {
+  nav: 'Japanese pack', title: 'Japanese pack', running: 'Running version', installed: 'Installed version', check: 'Check for updates', install: 'Update', reconcile: 'Check result', releases: 'Releases / manual update', checked: 'Last checked', stage: 'Step',
+  pin: 'Updating changes your explicit pin to the selected release tag and preserves the distribution route.',
+  languageHint: 'Display language and text/code font preferences remain unchanged. When this pack is disabled, use the standard plugin manager or CLI to update it.',
+  idle: 'Ready to check.', available: 'Update available.', current: 'No newer stable release.', unavailable: 'Automatic updating is unavailable.', incompatible: 'This release does not support your DSH version.', checking: 'Checking releases…', installing: 'Installing…', unknown: 'The result is unknown. Check the result; do not repeat installation.', 'restart-required': 'Restart DSH to use the installed version.', applied: 'The running version has been verified.', overridden: 'A higher priority setting overrode this update.', failed: 'The update failed.', cancelled: 'Installation was cancelled.',
+  'management-required': 'The plugin manager or writable profile is unavailable.', unaddressable: 'This bundle is read-only.', 'source-unsupported': 'This installation route requires manual updating.', checksum: 'The checksum did not match.', connection: 'The connection was interrupted.', other: 'Metadata, download, or installation failed. See Releases or the plugin manager for details.',
+}
+export const ja = {
+  nav: '日本語パック', title: '日本語パック', running: '実行版', installed: '導入版', check: '更新を確認', install: '更新する', reconcile: '結果を確認', releases: 'Release・手動更新', checked: '確認日時', stage: '段階',
+  pin: '版固定を選択したReleaseタグに変更し、現在の配布経路を維持します。',
+  languageHint: '表示言語とテキスト・コード用フォントの選択は変更しません。このパックを無効にした場合は標準のplugin managerまたはCLIから更新してください。',
+  idle: '更新は未確認です。', available: '更新があります。', current: '新しい正式Releaseはありません。', unavailable: 'この構成では自動更新できません。', incompatible: 'このReleaseは使用中のDSHに対応していません。', checking: '更新を確認中…', installing: 'インストール中…', unknown: '結果が不明です。導入を繰り返さず、結果を確認してください。', 'restart-required': '導入版を使うにはDSHを再起動してください。', applied: '実行版の反映を確認しました。', overridden: '上位の設定により更新が反映されませんでした。', failed: '更新に失敗しました。', cancelled: 'インストールは取り消されました。',
+  'management-required': 'plugin managerまたは書き込み可能なprofileがありません。', unaddressable: 'このbundleは読み取り専用です。', 'source-unsupported': '現在の導入経路は手動更新が必要です。', checksum: 'チェックサムが一致しません。', connection: '接続が切れました。', other: 'metadataの確認・取得・導入に失敗しました。Releaseまたはplugin managerで詳細を確認してください。',
+}
