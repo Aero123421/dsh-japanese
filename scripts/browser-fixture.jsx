@@ -4,6 +4,7 @@ import React, { useSyncExternalStore } from 'react'
 import { Context } from '@deepseek-ai/cordis'
 import { apply as renderer } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
+import { VERSION } from '../src/version.ts'
 
 const factories = new Map()
 window.__ModuleLoader__ = { load: ({ id, factory }) => factories.set(id, factory) }
@@ -14,7 +15,7 @@ window.mountPlugin = async () => {
   let installs = 0, updateState = 'unavailable'
   if (!location.search.includes('no-connection')) ctx.provide('connection', { rpc: { call: async (_base, method, payload) => {
     if (method.endsWith('update-install')) { installs++; updateState = 'restart-required' }
-    return { ok: true, value: { status: updateState, running: '0.2.0', ...(updateState === 'available' ? { candidate: { id: 'fixture', version: '0.3.0', notes: '更新の説明', url: 'https://github.com/Aero123421/dsh-japanese/releases/tag/v0.3.0', runtime: '0.2.1-alpha.2' } } : {}), ...(payload.operationId ? { operation: payload.operationId } : {}) } }
+    return { ok: true, value: { status: updateState, running: VERSION, profileKey: 'a'.repeat(64), ...(updateState === 'available' ? { candidate: { id: 'fixture', version: '0.3.0', notes: '更新の説明', url: 'https://github.com/Aero123421/dsh-japanese/releases/tag/v0.3.0', runtime: '0.2.1-alpha.2' } } : {}), ...(payload.operationId ? { operation: payload.operationId } : {}) } }
   } } })
   const root = ctx.plugin(renderer); await root.await()
   const absent = Object.freeze({ key: undefined, hooks: {}, keyedHooks: {}, props: {} })
