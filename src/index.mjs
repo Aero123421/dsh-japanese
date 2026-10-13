@@ -17,11 +17,11 @@ export function apply(ctx) {
           const envelope = await request.json()
           if (!envelope || envelope.type !== 'client-request' || typeof envelope.rpcId !== 'string' || envelope.rpcId.length > 100 || envelope.method !== endpoint || !envelope.payload || typeof envelope.payload !== 'object' || Array.isArray(envelope.payload)) return new Response('invalid request', { status: 400 })
           rpcId = envelope.rpcId; request.signal.throwIfAborted()
-          const value = method === 'status' ? await updates.status(envelope.payload.operationId) : method === 'check' ? await updates.check() : await updates.install(envelope.payload.candidateId, envelope.payload.operationId)
+          const value = method === 'status' ? await updates.status(envelope.payload.operationId) : method === 'check' ? await updates.check() : await updates.install(envelope.payload.candidateId, envelope.payload.operationId, envelope.payload.profileKey)
           return Response.json({ type: 'server-response', rpcId, result: { ok: true, value } }, { headers: { 'cache-control': 'no-store' } })
         } catch (error) {
           if (rpcId === undefined) return new Response('invalid request', { status: 400 })
-          return Response.json({ type: 'server-response', rpcId, result: { ok: false, error: { code: `dsh-japanese-updates/${error instanceof Error && error.message === 'busy' ? 'busy' : 'unavailable'}`, message: 'unavailable', details: {} } } }, { headers: { 'cache-control': 'no-store' } })
+          return Response.json({ type: 'server-response', rpcId, result: { ok: false, error: { code: `dsh-japanese-updates/${error instanceof Error && ['busy', 'profile-changed'].includes(error.message) ? error.message : 'unavailable'}`, message: 'unavailable', details: {} } } }, { headers: { 'cache-control': 'no-store' } })
         }
       } })
     }

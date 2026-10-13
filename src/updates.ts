@@ -18,7 +18,7 @@ export interface Manager {
 export type UpdateStatus = 'idle' | 'available' | 'current' | 'unavailable' | 'incompatible' | 'checking' | 'installing' | 'unknown' | 'restart-required' | 'applied' | 'overridden' | 'failed' | 'cancelled'
 interface Candidate { id: string; version: string; tag: string; notes: string; url: string; runtime: string; filename: string; tarball: string; checksum: string }
 interface Operation { id: string; version: string; result?: ChangeResult }
-export interface UpdateView { status: UpdateStatus; running: string; installed?: string; candidate?: Candidate; operation?: string; reason?: string; stage?: string; checkedAt?: string }
+export interface UpdateView { status: UpdateStatus; running: string; profileKey: string | null; installed?: string; candidate?: Candidate; operation?: string; reason?: string; stage?: string; checkedAt?: string }
 
 // Explicit GitHub tags remain explicit. Release filenames classify the local
 // tarball route; only the new fixed-repository candidate is verified.
@@ -98,6 +98,7 @@ export class Updates {
   private pending?: Promise<UpdateView> | undefined
   private readonly getManager: () => Manager | undefined
   private readonly dir: string | undefined
+  readonly profileKey: string | null
   private readonly running: string
   private readonly runtime: string
   private readonly fetcher: typeof fetch
@@ -106,7 +107,8 @@ export class Updates {
   constructor(getManager: () => Manager | undefined, dir: string | undefined, running: string, runtime: string, fetcher: typeof fetch = fetch) {
     this.getManager = getManager; this.dir = dir; this.running = running; this.runtime = runtime
     this.fetcher = (input, options) => fetcher(input, { ...options, signal: options?.signal ? AbortSignal.any([options.signal, this.abort.signal]) : this.abort.signal })
-    this.view = { status: 'idle', running }
+    this.profileKey = dir ? createHash('sha256').update(`${PACKAGE}:${dir}`).digest('hex') : null
+    this.view = { status: 'idle', running, profileKey: this.profileKey }
   }
   dispose() { this.closed = true; this.abort.abort() }
   private get manager(): Manager | undefined { return this.getManager() }
@@ -165,7 +167,7 @@ export class Updates {
   private result(result: ChangeResult, installed?: string): UpdateView {
     const operation = this.operation!
     let status: UpdateStatus = result.application
-    if (result.error || result.application === 'failed' || (result.packageResult && (result.packageResult.exitCode !== 0 || result.packageResult.timedOut))) status = 'failed'
+    if (result.application === 'failed' || (['applied', 'restart-required'].includes(result.application) && (result.error || result.packageResult && (result.packageResult.exitCode !== 0 || result.packageResult.timedOut)))) status = 'failed'
     else if (result.application === 'applied' || result.application === 'restart-required') {
       if (result.bundle !== PACKAGE || result.version !== operation.version || installed !== operation.version) status = 'unknown'
       else status = this.running === operation.version ? 'applied' : 'restart-required'
@@ -178,17 +180,18 @@ export class Updates {
     if (this.view.status === 'installing' || this.view.status === 'unknown') return this.status()
     this.pending = (async () => {
       try {
-        const bundle = await this.bundle(); this.candidate = undefined; this.view = { status: 'checking', running: this.running }
+        const bundle = await this.bundle(); this.candidate = undefined; this.view = { status: 'checking', running: this.running, profileKey: this.profileKey }
         const candidate = await getCandidate(this.runtime, this.fetcher)
         if (!semver.valid(this.running)) throw new Error('metadata')
         this.candidate = candidate
-        this.view = { status: semver.gt(candidate.version, bundle.version ?? this.running) ? 'available' : 'current', running: this.running, candidate, checkedAt: new Date().toISOString() }
+        this.view = { status: semver.gt(candidate.version, bundle.version ?? this.running) ? 'available' : 'current', running: this.running, profileKey: this.profileKey, candidate, checkedAt: new Date().toISOString() }
         return this.view
       } catch (error) { return this.fail(error, error instanceof Error && error.message === 'incompatible' ? 'incompatible' : 'failed') }
     })().finally(() => { this.pending = undefined })
     return this.pending
   }
-  install(candidateId: unknown, operationId: unknown): Promise<UpdateView> {
+  install(candidateId: unknown, operationId: unknown, expectedProfileKey: unknown): Promise<UpdateView> {
+    if (!this.profileKey || expectedProfileKey !== this.profileKey) return Promise.reject(new Error('profile-changed'))
     if (this.pending) return this.pendingOperation !== undefined && this.pendingOperation === operationId ? this.pending : Promise.reject(new Error('busy'))
     this.pendingOperation = typeof operationId === 'string' ? operationId : undefined
     this.pending = (async () => {

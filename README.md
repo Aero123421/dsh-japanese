@@ -53,3 +53,5 @@ dsh plugin --profile web add -w github:Aero123421/dsh-japanese#v0.2.0
 ```
 
 画面からの更新はOFF状態を維持します。CLIの`add`は導入時の有効化を行うため、OFFを維持する必要がある場合はDSH標準のplugin managerから更新してください。
+
+更新操作のブラウザー内記録は接続先のプロファイルごとに保存します。再接続時はDSHが保持する最新の操作を優先し、結果不明の導入を再送しません。

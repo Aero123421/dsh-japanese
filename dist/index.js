@@ -2177,6 +2177,7 @@ var Updates = class {
   pending;
   getManager;
   dir;
+  profileKey;
   running;
   runtime;
   fetcher;
@@ -2188,7 +2189,8 @@ var Updates = class {
     this.running = running;
     this.runtime = runtime;
     this.fetcher = (input, options) => fetcher(input, { ...options, signal: options?.signal ? AbortSignal.any([options.signal, this.abort.signal]) : this.abort.signal });
-    this.view = { status: "idle", running };
+    this.profileKey = dir ? createHash("sha256").update(`${PACKAGE}:${dir}`).digest("hex") : null;
+    this.view = { status: "idle", running, profileKey: this.profileKey };
   }
   dispose() {
     this.closed = true;
@@ -2266,7 +2268,7 @@ var Updates = class {
   result(result, installed) {
     const operation = this.operation;
     let status = result.application;
-    if (result.error || result.application === "failed" || result.packageResult && (result.packageResult.exitCode !== 0 || result.packageResult.timedOut)) status = "failed";
+    if (result.application === "failed" || ["applied", "restart-required"].includes(result.application) && (result.error || result.packageResult && (result.packageResult.exitCode !== 0 || result.packageResult.timedOut))) status = "failed";
     else if (result.application === "applied" || result.application === "restart-required") {
       if (result.bundle !== PACKAGE || result.version !== operation.version || installed !== operation.version) status = "unknown";
       else status = this.running === operation.version ? "applied" : "restart-required";
@@ -2282,11 +2284,11 @@ var Updates = class {
       try {
         const bundle = await this.bundle();
         this.candidate = void 0;
-        this.view = { status: "checking", running: this.running };
+        this.view = { status: "checking", running: this.running, profileKey: this.profileKey };
         const candidate = await getCandidate(this.runtime, this.fetcher);
         if (!import_semver.default.valid(this.running)) throw new Error("metadata");
         this.candidate = candidate;
-        this.view = { status: import_semver.default.gt(candidate.version, bundle.version ?? this.running) ? "available" : "current", running: this.running, candidate, checkedAt: (/* @__PURE__ */ new Date()).toISOString() };
+        this.view = { status: import_semver.default.gt(candidate.version, bundle.version ?? this.running) ? "available" : "current", running: this.running, profileKey: this.profileKey, candidate, checkedAt: (/* @__PURE__ */ new Date()).toISOString() };
         return this.view;
       } catch (error) {
         return this.fail(error, error instanceof Error && error.message === "incompatible" ? "incompatible" : "failed");
@@ -2296,7 +2298,8 @@ var Updates = class {
     });
     return this.pending;
   }
-  install(candidateId, operationId) {
+  install(candidateId, operationId, expectedProfileKey) {
+    if (!this.profileKey || expectedProfileKey !== this.profileKey) return Promise.reject(new Error("profile-changed"));
     if (this.pending) return this.pendingOperation !== void 0 && this.pendingOperation === operationId ? this.pending : Promise.reject(new Error("busy"));
     this.pendingOperation = typeof operationId === "string" ? operationId : void 0;
     this.pending = (async () => {
@@ -2353,7 +2356,7 @@ var Updates = class {
 };
 
 // src/version.ts
-var VERSION = "0.2.0";
+var VERSION = "0.2.1";
 
 // src/index.mjs
 function apply(ctx) {
@@ -2370,11 +2373,11 @@ function apply(ctx) {
           if (!envelope || envelope.type !== "client-request" || typeof envelope.rpcId !== "string" || envelope.rpcId.length > 100 || envelope.method !== endpoint || !envelope.payload || typeof envelope.payload !== "object" || Array.isArray(envelope.payload)) return new Response("invalid request", { status: 400 });
           rpcId = envelope.rpcId;
           request.signal.throwIfAborted();
-          const value = method === "status" ? await updates.status(envelope.payload.operationId) : method === "check" ? await updates.check() : await updates.install(envelope.payload.candidateId, envelope.payload.operationId);
+          const value = method === "status" ? await updates.status(envelope.payload.operationId) : method === "check" ? await updates.check() : await updates.install(envelope.payload.candidateId, envelope.payload.operationId, envelope.payload.profileKey);
           return Response.json({ type: "server-response", rpcId, result: { ok: true, value } }, { headers: { "cache-control": "no-store" } });
         } catch (error) {
           if (rpcId === void 0) return new Response("invalid request", { status: 400 });
-          return Response.json({ type: "server-response", rpcId, result: { ok: false, error: { code: `dsh-japanese-updates/${error instanceof Error && error.message === "busy" ? "busy" : "unavailable"}`, message: "unavailable", details: {} } } }, { headers: { "cache-control": "no-store" } });
+          return Response.json({ type: "server-response", rpcId, result: { ok: false, error: { code: `dsh-japanese-updates/${error instanceof Error && ["busy", "profile-changed"].includes(error.message) ? error.message : "unavailable"}`, message: "unavailable", details: {} } } }, { headers: { "cache-control": "no-store" } });
         }
       } });
     }

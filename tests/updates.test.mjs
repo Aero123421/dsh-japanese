@@ -8,6 +8,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { Updates, getCandidate, PACKAGE, REPOSITORY, supportsSource } from '../src/updates.ts'
 import { boundedFetch } from '../src/update-download.ts'
 import { UpdateController } from '../src/update-controller.ts'
+const PROFILE_KEY = 'a'.repeat(64)
 const runtime = '0.2.1-alpha.2'
 const version = '0.4.0', tag = 'v'+version, filename = `local-dsh-japanese-${version}.tgz`
 function archive(value) {
@@ -48,11 +49,11 @@ test('Disabled bundle stays disabled; pin remains explicit; restart is not succe
   const { updates, manager, dir, calls } = await fixture(t)
   const checked = await updates.check(), id = randomUUID()
   assert.equal(checked.status, 'available')
-  const result = await updates.install(checked.candidate.id, id)
+  const result = await updates.install(checked.candidate.id, id, updates.profileKey)
   assert.equal(result.status, 'restart-required'); assert.equal(calls.length, 1)
   assert.equal(calls[0].config.enabled, false); assert.equal(calls[0].config.requestId, id)
   assert.equal(calls[0].spec, `github:${REPOSITORY}#${tag}`)
-  await updates.install(checked.candidate.id, id); assert.equal(calls.length, 1)
+  await updates.install(checked.candidate.id, id, updates.profileKey); assert.equal(calls.length, 1)
   const restarted = new Updates(() => manager, dir, version, runtime, fetcher())
   assert.equal((await restarted.status()).status, 'applied')
 })
@@ -60,7 +61,7 @@ test('Failure, cancellation, override and incorrect manifest version are never s
   for (const application of ['failed', 'cancelled', 'overridden', 'applied']) {
     const { updates } = await fixture(t, { result: { application, ...(application === 'applied' ? { version: '9.0.0' } : {}) } })
     const checked = await updates.check()
-    const result = await updates.install(checked.candidate.id, randomUUID())
+    const result = await updates.install(checked.candidate.id, randomUUID(), updates.profileKey)
     assert.equal(result.status, application === 'applied' ? 'unknown' : application)
   }
 })
@@ -68,10 +69,10 @@ test('Installer transport loss and null wait result remain unknown and never res
   let installs = 0
   const { updates, dir, manager } = await fixture(t, { manager: { installBundle: async () => { installs++; throw new Error('lost') } } })
   const checked = await updates.check(), id = randomUUID()
-  assert.equal((await updates.install(checked.candidate.id, id)).status, 'unknown')
+  assert.equal((await updates.install(checked.candidate.id, id, updates.profileKey)).status, 'unknown')
   const reconnect = new Updates(() => manager, dir, '0.2.0', runtime, fetcher())
   assert.equal((await reconnect.status()).status, 'unknown')
-  await reconnect.install(checked.candidate.id, id); assert.equal(installs, 1)
+  await reconnect.install(checked.candidate.id, id, reconnect.profileKey); assert.equal(installs, 1)
 })
 test('Optional manager, read-only, unsupported source do not fetch or install', async t => {
   const { updates } = await fixture(t, { bundle: { readOnlyReason: 'management-required' }, fetcher: async () => { throw new Error('should not fetch') } })
@@ -83,7 +84,7 @@ test('Optional manager, read-only, unsupported source do not fetch or install', 
 test('Tarball route verifies digest, preserves disabled state, and uses retained verified file', async t => {
   const { updates, calls } = await fixture(t, { bundle: { source: `https://github.com/${REPOSITORY}/releases/download/v0.2.0/local-dsh-japanese-0.2.0.tgz` } })
   const checked = await updates.check()
-  assert.equal((await updates.install(checked.candidate.id, randomUUID())).status, 'restart-required')
+  assert.equal((await updates.install(checked.candidate.id, randomUUID(), updates.profileKey)).status, 'restart-required')
   assert.match(calls[0].spec, /\.dsh-japanese-update\/verified-.*\.tgz$/)
   assert.equal(calls[0].config.enabled, false)
 })
@@ -91,7 +92,7 @@ test('Checksum failure is recorded as failure before manager is invoked', async 
   const normal = fetcher()
   const { updates, calls } = await fixture(t, { bundle: { source: `https://github.com/${REPOSITORY}/releases/download/v0.2.0/local-dsh-japanese-0.2.0.tgz` }, fetcher: url => String(url).endsWith('SHA256SUMS') ? Promise.resolve(new Response('invalid')) : normal(url) })
   const checked = await updates.check()
-  assert.equal((await updates.install(checked.candidate.id, randomUUID())).status, 'failed')
+  assert.equal((await updates.install(checked.candidate.id, randomUUID(), updates.profileKey)).status, 'failed')
   assert.equal(calls.length, 0); assert.equal((await updates.status()).status, 'failed')
 })
 test('Redirects, oversized streams and HTTP errors fail closed', async () => {
@@ -104,12 +105,12 @@ test('Client reset discards old response and reconciles without repeating instal
   const requests = []
   const controller = new UpdateController({ rpc: { call: (_base, method, payload) => new Promise(resolve => requests.push({ method, payload, resolve })) } })
   const first = controller.status()
-  requests[0].resolve({ ok: true, value: { status: 'available', running: '0.2.0', candidate: { id: 'candidate', version, url: `https://github.com/${REPOSITORY}/releases/tag/${tag}`, runtime, notes: '' } } }); await first
+  requests[0].resolve({ ok: true, value: { status: 'available', profileKey: PROFILE_KEY, running: '0.2.0', candidate: { id: 'candidate', version, url: `https://github.com/${REPOSITORY}/releases/tag/${tag}`, runtime, notes: '' } } }); await first
   const install = controller.install(); const duplicate = controller.install(); await duplicate
   controller.reset()
   assert.equal(requests[2].method, 'dsh-japanese-updates/update-status')
-  requests[2].resolve({ ok: true, value: { status: 'restart-required', running: '0.2.0' } }); await new Promise(resolve => setImmediate(resolve))
-  requests[1].resolve({ ok: true, value: { status: 'applied', running: version } }); await install
+  requests[2].resolve({ ok: true, value: { status: 'restart-required', operation: requests[1].payload.operationId, profileKey: PROFILE_KEY, running: '0.2.0' } }); await new Promise(resolve => setImmediate(resolve))
+  requests[1].resolve({ ok: true, value: { status: 'applied', profileKey: PROFILE_KEY, running: version } }); await install
   assert.equal(controller.getSnapshot().status, 'restart-required')
   assert.equal(requests.filter(request => request.method.endsWith('update-install')).length, 1)
   controller.dispose()
@@ -119,10 +120,10 @@ test('A failed preparation can be checked and retried with a new operation', asy
   const normal = fetcher()
   const { updates, calls } = await fixture(t, { bundle: { source: 'file:/downloads/local-dsh-japanese-0.2.0.tgz' }, fetcher: url => bad && String(url).endsWith('SHA256SUMS') ? Promise.resolve(new Response('invalid')) : normal(url) })
   const first = await updates.check()
-  assert.equal((await updates.install(first.candidate.id, randomUUID())).status, 'failed')
+  assert.equal((await updates.install(first.candidate.id, randomUUID(), updates.profileKey)).status, 'failed')
   bad = false
   const second = await updates.check()
-  assert.equal((await updates.install(second.candidate.id, randomUUID())).status, 'restart-required')
+  assert.equal((await updates.install(second.candidate.id, randomUUID(), updates.profileKey)).status, 'restart-required')
   assert.equal(calls.length, 1)
 })
 test('Disabling the plugin during preparation prevents later installer invocation', async t => {
@@ -132,7 +133,7 @@ test('Disabling the plugin during preparation prevents later installer invocatio
     if (String(url).endsWith(filename)) { waiting(); await new Promise(resolve => { releaseDownload = resolve }) }
     return normal(url)
   } })
-  const checked = await updates.check(), installing = updates.install(checked.candidate.id, randomUUID())
+  const checked = await updates.check(), installing = updates.install(checked.candidate.id, randomUUID(), updates.profileKey)
   await started; updates.dispose(); releaseDownload(); await installing
   assert.equal(calls.length, 0)
 })
@@ -140,13 +141,13 @@ test('Another Client cannot settle an unresolved operation or start a second ins
   let installs = 0
   const { updates, dir, manager } = await fixture(t, { manager: { installBundle: async () => { installs++; throw new Error('lost manager result') } } })
   const checked = await updates.check(), firstId = randomUUID()
-  assert.equal((await updates.install(checked.candidate.id, firstId)).status, 'unknown')
+  assert.equal((await updates.install(checked.candidate.id, firstId, updates.profileKey)).status, 'unknown')
   const second = new Updates(() => manager, dir, '0.2.0', runtime, fetcher())
-  assert.equal((await second.install(checked.candidate.id, randomUUID())).status, 'unknown')
+  assert.equal((await second.install(checked.candidate.id, randomUUID(), second.profileKey)).status, 'unknown')
   const third = new Updates(() => manager, dir, '0.2.0', runtime, fetcher())
   assert.equal((await third.status()).status, 'unknown')
   assert.equal((await third.check()).status, 'unknown')
-  assert.equal((await third.install(checked.candidate.id, randomUUID())).status, 'unknown')
+  assert.equal((await third.install(checked.candidate.id, randomUUID(), third.profileKey)).status, 'unknown')
   assert.equal(installs, 1)
   assert.equal((await updates.status()).operation, firstId)
 })
@@ -155,8 +156,8 @@ test('A busy install rejects another operation ID and a check cannot masquerade 
   const start = new Promise(resolve => { begun = resolve })
   const { updates } = await fixture(t, { manager: { installBundle: async () => { begun(); return new Promise(resolve => { settle = resolve }) } } })
   const checked = await updates.check()
-  const first = updates.install(checked.candidate.id, randomUUID()); await start
-  await assert.rejects(updates.install(checked.candidate.id, randomUUID()), /busy/)
+  const first = updates.install(checked.candidate.id, randomUUID(), updates.profileKey); await start
+  await assert.rejects(updates.install(checked.candidate.id, randomUUID(), updates.profileKey), /busy/)
   settle({ changed: false, application: 'failed', stage: 'install', target: PACKAGE }); await first
 })
 test('Matching checksums never admit an archive with the wrong package, version or DSH peers', async t => {
@@ -164,7 +165,7 @@ test('Matching checksums never admit an archive with the wrong package, version 
     const wrong = archive(value), normal = fetcher()
     const { updates, calls } = await fixture(t, { bundle: { source: 'file:/downloads/local-dsh-japanese-0.2.0.tgz' }, fetcher: async url => String(url).endsWith('SHA256SUMS') ? new Response(`${createHash('sha256').update(wrong).digest('hex')}  ${filename}\n`) : String(url).endsWith(filename) ? new Response(wrong) : normal(url) })
     const checked = await updates.check()
-    assert.equal((await updates.install(checked.candidate.id, randomUUID())).status, 'failed')
+    assert.equal((await updates.install(checked.candidate.id, randomUUID(), updates.profileKey)).status, 'failed')
     assert.equal(calls.length, 0)
   }
 })
@@ -174,7 +175,7 @@ test('A busy refusal clears the unadmitted Client ID before reconciling the Host
     count++
     if (method.endsWith('update-install')) return { ok: false, error: { code: 'dsh-japanese/busy' } }
     if (count > 2) assert.equal(payload.operationId, undefined)
-    return { ok: true, value: { status: 'available', running: '0.2.0', candidate: { id: 'fixture', version, url: `https://github.com/${REPOSITORY}/releases/tag/${tag}`, runtime, notes: '' } } }
+    return { ok: true, value: { status: 'available', profileKey: PROFILE_KEY, running: '0.2.0', candidate: { id: 'fixture', version, url: `https://github.com/${REPOSITORY}/releases/tag/${tag}`, runtime, notes: '' } } }
   } } })
   await controller.status(); await controller.install(); assert.equal(controller.getSnapshot().status, 'failed'); await controller.status(); controller.dispose()
 })
@@ -185,7 +186,7 @@ test('Dispose during the final asynchronous bundle lookup cannot invoke the inst
   const { updates } = await fixture(t, { manager: { listBundles: async () => {
     calls++; if (calls === 4) { finalLookup(); await new Promise(resolve => { releaseLookup = resolve }) } return [bundle]
   }, installBundle: async () => { throw new Error('Installer must not be invoked') } } })
-  const checked = await updates.check(), installing = updates.install(checked.candidate.id, randomUUID())
+  const checked = await updates.check(), installing = updates.install(checked.candidate.id, randomUUID(), updates.profileKey)
   await ready; updates.dispose(); releaseLookup()
   assert.equal((await installing).status, 'failed')
 })
@@ -197,4 +198,58 @@ test('A released-name local directory or symbolic link is not a tarball installa
   const target = join(dir, 'archive.tgz'), link = join(dir, 'local-dsh-japanese-0.2.0.tgz')
   await writeFile(target, bytes); await symlink(target, link); bundle.source = `file:${link}`
   assert.equal((await updates.status()).reason, 'source-unsupported')
+})
+function memoryStorage(values = []) {
+  const entries = new Map(values)
+  return { entries, getItem: key => entries.get(key) ?? null, setItem: (key, value) => entries.set(key, value), removeItem: key => entries.delete(key) }
+}
+function clientView(overrides = {}) { return { status: 'idle', profileKey: PROFILE_KEY, running: '0.2.0', ...overrides } }
+test('Same-origin profile changes isolate cached receipts and canonical Host latest operation wins', async () => {
+  const firstKey = PROFILE_KEY, secondKey = 'b'.repeat(64), stale = randomUUID(), latest = randomUUID()
+  const storage = memoryStorage([[`dsh.japanesePack.update.${firstKey}.operation`, stale]])
+  let key = firstKey, operation = latest; const requests = []
+  const controller = new UpdateController({ rpc: { call: async (_base, method, payload) => {
+    requests.push({ method, payload, key })
+    return { ok: true, value: clientView({ profileKey: key, status: operation ? 'installing' : 'idle', ...(operation ? { operation } : {}) }) }
+  } } }, storage)
+  await controller.status(); await controller.status()
+  assert.equal(controller.getSnapshot().operation, latest)
+  assert.equal(storage.entries.get(`dsh.japanesePack.update.${firstKey}.operation`), latest)
+  assert(requests.every(request => !request.payload.operationId))
+  key = secondKey; operation = undefined; await controller.status()
+  assert.equal(controller.getSnapshot().status, 'idle'); assert.equal(controller.getSnapshot().profileKey, secondKey)
+  assert.equal(requests.at(-1).payload.operationId, undefined)
+  assert.equal(storage.entries.get(`dsh.japanesePack.update.${secondKey}.operation`), undefined)
+  controller.dispose()
+})
+test('Lost first install reply survives reload using only the owning profile fallback receipt', async () => {
+  const storage = memoryStorage(), requests = []
+  const available = clientView({ status: 'available', candidate: { id: 'fixture', version, url: `https://github.com/${REPOSITORY}/releases/tag/${tag}`, runtime, notes: '' } })
+  const first = new UpdateController({ rpc: { call: async (_base, method, payload) => {
+    requests.push({ method, payload })
+    if (method.endsWith('update-install')) { assert.equal(payload.profileKey, PROFILE_KEY); assert.equal(storage.entries.get(`dsh.japanesePack.update.${PROFILE_KEY}.operation`), payload.operationId); throw Error('lost') }
+    return { ok: true, value: available }
+  } } }, storage)
+  await first.status(); await first.install(); first.dispose()
+  const id = storage.entries.get(`dsh.japanesePack.update.${PROFILE_KEY}.operation`)
+  const next = new UpdateController({ rpc: { call: async (_base, method, payload) => { requests.push({ method, payload }); return { ok: true, value: clientView(payload.operationId ? { status: 'unknown', operation: payload.operationId } : {}) } } } }, storage)
+  await next.status(); assert.equal(next.getSnapshot().status, 'unknown'); assert.equal(next.getSnapshot().operation, id)
+  assert.equal(requests.filter(request => request.method.endsWith('update-install')).length, 1)
+  next.dispose()
+})
+test('An unadmitted profile refusal clears the newly stored Client operation ID', async () => {
+  const storage = memoryStorage()
+  const controller = new UpdateController({ rpc: { call: async (_base, method) => method.endsWith('update-install') ? { ok: false, error: { code: 'updater/profile-changed' } } : { ok: true, value: clientView({ status: 'available', candidate: { id: 'fixture', version, url: `https://github.com/${REPOSITORY}/releases/tag/${tag}`, runtime, notes: '' } }) } } }, storage)
+  await controller.status(); await controller.install(); assert.equal(storage.entries.size, 0); assert.equal(controller.getSnapshot().status, 'failed'); controller.dispose()
+})
+test('Different or missing expected profile identity cannot admit an installation', async t => {
+  const { updates, calls } = await fixture(t), checked = await updates.check()
+  await assert.rejects(updates.install(checked.candidate.id, randomUUID(), 'b'.repeat(64)), /profile-changed/)
+  await assert.rejects(updates.install(checked.candidate.id, randomUUID(), undefined), /profile-changed/)
+  assert.equal(calls.length, 0)
+})
+test('Authoritative cancellation preserves its outcome after the installer abort exit', async t => {
+  const { updates } = await fixture(t, { result: { application: 'cancelled', packageResult: { exitCode: 130, timedOut: false } } })
+  const checked = await updates.check()
+  assert.equal((await updates.install(checked.candidate.id, randomUUID(), updates.profileKey)).status, 'cancelled')
 })
