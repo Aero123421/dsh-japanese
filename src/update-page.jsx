@@ -9,7 +9,7 @@ export function UpdatePage({ updates, locale }) {
   useSyncExternalStore(listener => locale.subscribe(listener), () => locale.getSnapshot().revision)
   const view = useSyncExternalStore(updates.subscribe, updates.getSnapshot), t = locale.bind(NS)
   useEffect(() => { void updates.status() }, [updates])
-  const busy = view.status === 'checking' || view.status === 'installing'
+  const busy = !view.profileKey || view.status === 'checking' || view.status === 'installing'
   return <section className="dsh-japanese-update-page">
     <h2>{t('title')}</h2>
     <p>{t('running')}: {view.running}{view.installed && view.installed !== view.running ? ` · ${t('installed')}: ${view.installed}` : ''}</p>
