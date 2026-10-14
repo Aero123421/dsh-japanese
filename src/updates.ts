@@ -14,6 +14,7 @@ export interface Manager {
   listBundles(): Promise<BundleInfo[]>
   installBundle(spec: string, options: { enabled: boolean; requestId: PluginInstallRequestId }): Promise<ChangeResult>
   waitForInstall(requestId: PluginInstallRequestId): Promise<ChangeResult | null>
+  removeBundle?(name: string): Promise<ChangeResult>
 }
 export type UpdateStatus = 'idle' | 'available' | 'current' | 'unavailable' | 'incompatible' | 'checking' | 'installing' | 'unknown' | 'restart-required' | 'applied' | 'overridden' | 'failed' | 'cancelled'
 interface Candidate { id: string; version: string; tag: string; notes: string; url: string; runtime: string; filename: string; tarball: string; checksum: string }
@@ -33,9 +34,17 @@ function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('metadata')
   return value as Record<string, unknown>
 }
-function errorCode(value: unknown): ManagementError['code'] {
-  const values: ManagementError['code'][] = ['management-required', 'unaddressable', 'unknown-plugin', 'invalid-spec', 'ambiguous-install', 'not-bundle', 'not-removable', 'stop-profile', 'bundle-in-use', 'stale-approval', 'incompatible-version', 'operation-error']
-  return values.find(code => code === value) ?? 'operation-error'
+const storedCodes = ['management-required', 'unaddressable', 'unknown-plugin', 'invalid-spec', 'ambiguous-install', 'not-bundle', 'not-removable', 'stop-profile', 'bundle-in-use', 'stale-approval', 'incompatible-version', 'operation-error', 'already-installed', 'settings-changed'] as const
+type StoredCode = typeof storedCodes[number]
+function errorCode(value: unknown): StoredCode {
+  return storedCodes.find(code => code === value) ?? 'operation-error'
+}
+function changeCode(result: ChangeResult): string | undefined {
+  const code = (result.error as { code?: unknown } | undefined)?.code
+  return typeof code === 'string' ? code : undefined
+}
+function refusal(application: 'failed' | 'cancelled', code: StoredCode, target = PACKAGE): ChangeResult {
+  return { changed: false, application, stage: 'install', target, ...(application === 'failed' ? { error: { code: code as ManagementError['code'] } } : {}) }
 }
 export function packageManifest(bytes: Buffer): Record<string, unknown> {
   const tar = gunzipSync(bytes, { maxOutputLength: 128 * 1024 * 1024 })
@@ -102,10 +111,14 @@ export class Updates {
   private readonly running: string
   private readonly runtime: string
   private readonly fetcher: typeof fetch
+  private readonly schedule: (task: () => Promise<void>) => void
   private closed = false
   private readonly abort = new AbortController()
-  constructor(getManager: () => Manager | undefined, dir: string | undefined, running: string, runtime: string, fetcher: typeof fetch = fetch) {
+  constructor(getManager: () => Manager | undefined, dir: string | undefined, running: string, runtime: string, fetcher: typeof fetch = fetch, schedule?: (task: () => Promise<void>) => void) {
     this.getManager = getManager; this.dir = dir; this.running = running; this.runtime = runtime
+    // queueMicrotask, not the plugin fiber: removeBundle stops this plugin while
+    // its caller is still suspended, and a disposer must not be that caller.
+    this.schedule = schedule ?? (task => { queueMicrotask(() => { void task() }) })
     this.fetcher = (input, options) => fetcher(input, { ...options, signal: options?.signal ? AbortSignal.any([options.signal, this.abort.signal]) : this.abort.signal })
     this.profileKey = dir ? createHash('sha256').update(`${PACKAGE}:${dir}`).digest('hex') : null
     this.view = { status: 'idle', running, profileKey: this.profileKey }
@@ -135,7 +148,7 @@ export class Updates {
   }
   private fail(error: unknown, status: UpdateStatus = 'failed'): UpdateView {
     const reason = error instanceof Error ? error.message : 'operation-error'
-    const known = ['management-required', 'unaddressable', 'not-installed', 'source-unsupported', 'metadata', 'metadata-size', 'incompatible', 'asset', 'checksum', 'redirect', 'size', 'storage', 'cancelled', 'candidate-changed', 'settings-changed', 'result-unknown', 'invalid-request', 'journal', 'release-unavailable', 'network']
+    const known = ['management-required', 'unaddressable', 'not-installed', 'source-unsupported', 'metadata', 'metadata-size', 'incompatible', 'asset', 'checksum', 'redirect', 'size', 'storage', 'cancelled', 'candidate-changed', 'settings-changed', 'already-installed', 'result-unknown', 'invalid-request', 'journal', 'release-unavailable', 'network']
     this.view = { ...this.view, status, reason: known.includes(reason) ? reason : 'operation-error' }; return this.view
   }
   async status(expectedId?: unknown): Promise<UpdateView> {
@@ -150,14 +163,14 @@ export class Updates {
           if (value.result) {
             const result = record(value.result)
             if (!['applied', 'restart-required', 'overridden', 'failed', 'cancelled'].includes(String(result.application)) || !['install', 'enable', 'remove'].includes(String(result.stage))) throw new Error('journal')
-            operation.result = { changed: false, target: PACKAGE, ...(result.bundle === PACKAGE ? { bundle: PACKAGE } : {}), application: result.application as ChangeResult['application'], stage: result.stage as ChangeResult['stage'], ...(typeof result.version === 'string' ? { version: result.version } : {}), ...(result.error ? { error: { code: errorCode(record(result.error).code) } } : {}) }
+            operation.result = { changed: false, target: PACKAGE, ...(result.bundle === PACKAGE ? { bundle: PACKAGE } : {}), application: result.application as ChangeResult['application'], stage: result.stage as ChangeResult['stage'], ...(typeof result.version === 'string' ? { version: result.version } : {}), ...(result.error ? { error: { code: errorCode(record(result.error).code) as ManagementError['code'] } } : {}) }
           }
           this.operation = operation
         } catch (error) { if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) return this.fail(error, 'unknown') }
       }
       if (expectedId && expectedId !== this.operation?.id) return { ...this.view, status: 'unknown', operation: typeof expectedId === 'string' ? expectedId : 'invalid' }
       if (this.operation) {
-        const result = this.operation.result ?? await this.manager!.waitForInstall(brandString<PluginInstallRequestId>(this.operation.id))
+        const result = this.operation.result ?? await this.manager!.waitForInstall(brandString<PluginInstallRequestId>(this.operation.id)) ?? await this.journalResult()
         if (!result) { this.view = { ...this.view, status: 'unknown', operation: this.operation.id }; return this.view }
         this.operation.result = result; await this.save(); return this.result(result, bundle.version)
       }
@@ -225,9 +238,18 @@ export class Updates {
         if (latest.source !== before.source || latest.enabled !== before.enabled) throw new Error('settings-changed')
         if (this.closed) throw new Error('cancelled')
         started = true
-        const result = await this.manager!.installBundle(spec, { enabled: before.enabled, requestId: brandString<PluginInstallRequestId>(operationId) })
+        const manager = this.manager!
+        let result = await manager.installBundle(spec, { enabled: before.enabled, requestId: brandString<PluginInstallRequestId>(operationId) })
+        // A matching spec is refused before pnpm, with no profile change. The
+        // plugin manager page removes and then installs from outside the
+        // target. This fiber is the target, so the follow-up runs on a later
+        // host turn with the manager captured here. Unload sets closed; that
+        // must not cancel the install that the removal itself started.
+        if (changeCode(result) === 'already-installed') result = await this.replaceInstalled(manager, spec, before, operationId)
         this.operation.result = result; await this.save()
-        const after = await this.bundle(); return this.result(result, after.version)
+        let installed = result.version
+        try { installed = (await this.bundle()).version } catch { /* The replacement may have unloaded this plugin. */ }
+        return this.result(result, installed)
       } catch (error) {
         if (admitted && this.operation && this.operation.id === operationId && !this.operation.result && !started) {
           this.operation.result = { changed: false, application: 'failed', target: PACKAGE, stage: 'install', error: { code: 'operation-error' } }
@@ -237,5 +259,49 @@ export class Updates {
       }
     })().finally(() => { this.pending = undefined; this.pendingOperation = undefined })
     return this.pending
+  }
+  private async journalResult(): Promise<ChangeResult | undefined> {
+    if (!this.operation) return undefined
+    try {
+      const value = record(JSON.parse(await readFile(this.path(), 'utf8')))
+      if (value.id !== this.operation.id || !value.result) return undefined
+      const parsed = record(value.result)
+      if (!['applied', 'restart-required', 'overridden', 'failed', 'cancelled'].includes(String(parsed.application)) || !['install', 'enable', 'remove'].includes(String(parsed.stage))) return undefined
+      return { changed: false, target: PACKAGE, ...(parsed.bundle === PACKAGE ? { bundle: PACKAGE } : {}), application: parsed.application as ChangeResult['application'], stage: parsed.stage as ChangeResult['stage'], ...(typeof parsed.version === 'string' ? { version: parsed.version } : {}), ...(parsed.error ? { error: { code: errorCode(record(parsed.error).code) as ManagementError['code'] } } : {}) }
+    } catch { return undefined }
+  }
+  private replaceInstalled(manager: Manager, spec: string, before: BundleInfo, operationId: string): Promise<ChangeResult> {
+    const remove = manager.removeBundle
+    if (remove === undefined) return Promise.resolve(refusal('failed', 'already-installed', spec))
+    const enabled = before.enabled
+    const previous = before.source
+    return new Promise<ChangeResult>((resolve, reject) => {
+      try { this.schedule(() => this.runReplacement(manager, remove, spec, enabled, previous, operationId).then(resolve, reject)) }
+      catch (error) { reject(error instanceof Error ? error : new Error('operation-error')) }
+    }).catch(() => refusal('failed', 'operation-error', spec))
+  }
+  private async runReplacement(manager: Manager, remove: (name: string) => Promise<ChangeResult>, spec: string, enabled: boolean, previous: string | undefined, operationId: string): Promise<ChangeResult> {
+    if (this.closed) return refusal('cancelled', 'operation-error')
+    let removed: ChangeResult | undefined
+    try {
+      const current = (await manager.listBundles()).find(row => row.name === PACKAGE)
+      if (!current?.installed || current.enabled !== enabled || current.source !== previous) return refusal('failed', 'settings-changed')
+      removed = await remove(PACKAGE)
+      if (removed.application !== 'applied' && removed.application !== 'restart-required') return removed
+      const installed = await manager.installBundle(spec, { enabled, requestId: brandString<PluginInstallRequestId>(operationId) })
+      await this.restoreIfMissing(manager, installed, enabled, previous)
+      return installed
+    } catch {
+      if (removed && previous !== undefined) await this.restoreIfMissing(manager, refusal('failed', 'operation-error'), enabled, previous)
+      return refusal('failed', 'operation-error')
+    }
+  }
+  private async restoreIfMissing(manager: Manager, installed: ChangeResult, enabled: boolean, previous: string | undefined): Promise<void> {
+    if (previous === undefined || (installed.application !== 'failed' && installed.application !== 'cancelled') || changeCode(installed) === 'already-installed') return
+    const present = await manager.listBundles().then(rows => rows.some(row => row.name === PACKAGE && row.installed)).catch(() => true)
+    if (present || !this.operation) return
+    this.operation.result = installed
+    await this.save().catch(() => {})
+    await manager.installBundle(previous, { enabled, requestId: brandString<PluginInstallRequestId>(randomUUID()) }).catch(() => undefined)
   }
 }

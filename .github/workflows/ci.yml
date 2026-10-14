@@ -15,6 +15,7 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
+      - run: node scripts/check-dsh-compat.mjs --online
       - run: npm run sync:contracts
       - run: git diff --exit-code -- tests/fixtures/upstream-dictionaries.json
       - run: npm run build

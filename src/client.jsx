@@ -1,4 +1,5 @@
 import { registerUpdatePage } from './update-page.jsx'
+import { registerJapaneseDictionaries } from './register-dictionaries.mjs'
 import dictionaries from '../.cache/translations.json'
 import fontCss from '../.cache/font-css.mjs'
 
@@ -18,9 +19,7 @@ export function apply(ctx) {
   if (!ctx.locale.getSnapshot().locales.some(locale => locale.id === 'ja')) {
     ctx.effect(() => ctx.locale.addLanguage({ id: 'ja', label: '日本語', fallback: 'en' }), 'dsh-japanese: language')
   }
-  for (const [namespace, dictionary] of Object.entries(dictionaries)) {
-    ctx.effect(() => ctx.locale.register(namespace, 'ja', dictionary), `dsh-japanese: ${namespace}`)
-  }
+  registerJapaneseDictionaries(ctx, dictionaries)
   ctx.effect(() => {
     const style = document.createElement('style')
     style.dataset.dshJapanese = ''

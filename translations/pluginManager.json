@@ -15,7 +15,7 @@
   "chooseAddMethod": "プラグインの追加方法を選択",
   "installExisting": "サードパーティのプラグインをインストール",
   "installExistingDescription": "npmパッケージ、Gitリポジトリ、ローカルフォルダに対応",
-  "restartNotice": "変更は次の起動時に反映されます",
+  "restartNotice": "変更を反映するにはDSHを再起動してください。{reason}",
   "overriddenNotice": "{name}は保存されましたが、優先度の高い設定で上書きされるため反映されていません",
   "bundlesTitle": "インストール済み",
   "statusProblem": "問題",
@@ -161,7 +161,7 @@
   "terminalSignal": "シグナル{signal}",
   "terminalNoExitCode": "終了コードなし",
   "installDoneNothing": "新しい依存関係を追加せずにインストールが終了しました。",
-  "installDoneRestart": "インストールしました。次の起動時に読み込まれます。",
+  "installDoneRestart": "インストールしました。読み込むにはDSHを再起動してください。{reason}",
   "installDoneApproved": "{names}のインストールスクリプトを許可しました",
   "installDoneOtherVersion": "pnpmのサプライチェーン保護（minimumReleaseAge）により、公開後の待機期間を満たさないバージョンは自動でインストールされません。そのため最新の{version}ではなく{installed}を使用しました。新しいバージョンには未検出の不正なコードや不具合が含まれる可能性があります。{version}が必要な場合は現在のバージョンをアンインストールし、{exact}を指定してインストールしてください。",
   "installApprovalTitle": "インストールスクリプトの許可が必要です",
@@ -207,5 +207,13 @@
   "sourceTargetVersion": "このDSH用のバージョン",
   "update": "更新",
   "updateLabel": "{name}を更新",
-  "terminalCommandLine": "コマンド行 {n}"
+  "terminalCommandLine": "コマンド行 {n}",
+  "previewAlt": "{name}の機能プレビュー",
+  "previewUnavailable": "機能プレビューを表示できません",
+  "reasonAlreadyInstalled": "このパッケージはインストール済みです。別のバージョンを入れる前にアンインストールしてください。",
+  "restartReasonHostModule": "この変更は、DSH本体が読み込んだモジュールに影響します。",
+  "restartReasonModuleComparison": "読み込み済みのプラグインとファイルを比較できませんでした。",
+  "restartReasonNoHmr": "このプロファイルは、起動時にだけ変更を反映します。",
+  "restartReasonPackageMoved": "インストール済みパッケージの解決先が別のディレクトリになったか、DSHのインストールが提供するパッケージを置き換える変更です。別の場所から入れる前にアンインストールしてください。",
+  "restartReasonUnmanagedPlugin": "この変更は、プラグイン一覧の外で動作しているプラグインに影響します。"
 }
