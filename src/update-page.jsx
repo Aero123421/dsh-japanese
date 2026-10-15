@@ -13,7 +13,10 @@ export function UpdatePage({ updates, locale }) {
   return <section className="dsh-japanese-update-page">
     <h2>{t('title')}</h2>
     <p>{t('running')}: {view.running}{view.installed && view.installed !== view.running ? ` · ${t('installed')}: ${view.installed}` : ''}</p>
-    <p role="status">{t(view.status)}{view.reason && <span> · {t(view.reason in en ? view.reason : 'other')}</span>}{view.stage && <span> · {t('stage')}: {view.stage}</span>}</p>
+    <div role="status">
+      <p>{t(view.status)}{view.reason && view.reason !== 'restore-failed' && <span> · {t(view.reason in en ? view.reason : 'other')}</span>}{view.stage && view.reason !== 'restore-failed' && <span> · {t('stage')}: {view.stage}</span>}</p>
+      {view.reason === 'restore-failed' && <><p>{t('restore-failed')}</p><p className="dsh-japanese-update-command">{t('restore-failed-command')}</p></>}
+    </div>
     {view.checkedAt && <p className="dsh-japanese-update-muted">{t('checked')}: {new Date(view.checkedAt).toLocaleString()}</p>}
     {view.candidate && view.status === 'available' && <><p>{view.running} → {view.candidate.version} · DSH {view.candidate.runtime}</p><p className="dsh-japanese-update-notes">{view.candidate.notes}</p><p className="dsh-japanese-update-muted">{t('pin')}</p></>}
     <div className="dsh-japanese-update-actions">

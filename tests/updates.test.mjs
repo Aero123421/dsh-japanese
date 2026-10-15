@@ -328,10 +328,69 @@ test('A failed replacement restores the previous spec when the package is gone',
     removeBundle: async () => { bundle.installed = false; return { changed: true, application: 'applied', stage: 'remove', target: PACKAGE } },
   } })
   const checked = await updates.check(), id = randomUUID()
-  assert.equal((await updates.install(checked.candidate.id, id, updates.profileKey)).status, 'failed'); assert.equal(installs, 3)
+  const restored = await updates.install(checked.candidate.id, id, updates.profileKey)
+  assert.equal(restored.status, 'failed'); assert.equal(restored.reason, 'operation-error'); assert.equal(installs, 3)
   assert.equal(seen[2].spec, `github:${REPOSITORY}#v0.2.0`); assert.equal(seen[2].config.enabled, false)
   const reloaded = new Updates(() => manager, dir, '0.2.0', runtime, fetcher())
-  assert.equal((await reloaded.status()).status, 'failed'); assert.equal((await reloaded.status()).operation, id)
+  assert.equal((await reloaded.status()).status, 'failed'); assert.equal((await reloaded.status()).reason, 'operation-error'); assert.equal((await reloaded.status()).operation, id)
+})
+test('A failed restore reports that the previous package is missing and how to reinstall', async t => {
+  const seen = []
+  let installs = 0
+  const { updates, bundle, dir, manager } = await fixture(t, { schedule: later, manager: {
+    installBundle: async (spec, config) => {
+      installs++; seen.push({ spec, config })
+      if (installs === 1) return { changed: false, application: 'failed', stage: 'install', target: spec, error: { code: 'already-installed' } }
+      bundle.installed = false
+      return { changed: false, application: 'failed', stage: 'install', target: spec, error: { code: 'operation-error' } }
+    },
+    removeBundle: async () => { bundle.installed = false; return { changed: true, application: 'applied', stage: 'remove', target: PACKAGE } },
+  } })
+  const checked = await updates.check(), id = randomUUID()
+  const failed = await updates.install(checked.candidate.id, id, updates.profileKey)
+  assert.equal(failed.status, 'failed'); assert.equal(failed.reason, 'restore-failed'); assert.equal(installs, 3)
+  assert.equal(seen[2].spec, `github:${REPOSITORY}#v0.2.0`); assert.equal(seen[2].config.enabled, false)
+  assert.match(ja['restore-failed'], /以前の版も戻せませんでした/)
+  assert.match(ja['restore-failed'], /github:Aero123421\/dsh-japanese/)
+  assert.match(ja['restore-failed'], /プラグインを追加/)
+  assert.equal(ja['restore-failed-command'], 'dsh plugin --profile web add -w github:Aero123421/dsh-japanese')
+  assert.match(en['restore-failed'], /previous version could not be restored/)
+  assert.equal(en['restore-failed-command'], ja['restore-failed-command'])
+  const reloaded = new Updates(() => manager, dir, '0.2.0', runtime, fetcher())
+  const again = await reloaded.status()
+  assert.equal(again.status, 'failed'); assert.equal(again.reason, 'restore-failed'); assert.equal(again.operation, id)
+  assert.equal((await reloaded.check()).reason, 'restore-failed')
+})
+test('A thrown restore install is not reported as the original install failure', async t => {
+  let installs = 0
+  const { updates, bundle } = await fixture(t, { schedule: later, manager: {
+    installBundle: async spec => {
+      installs++
+      if (installs === 1) return { changed: false, application: 'failed', stage: 'install', target: spec, error: { code: 'already-installed' } }
+      if (installs === 2) { bundle.installed = false; return { changed: false, application: 'failed', stage: 'install', target: spec, error: { code: 'operation-error' } } }
+      throw new Error('restore exploded')
+    },
+    removeBundle: async () => { bundle.installed = false; return { changed: true, application: 'applied', stage: 'remove', target: PACKAGE } },
+  } })
+  const checked = await updates.check()
+  const failed = await updates.install(checked.candidate.id, randomUUID(), updates.profileKey)
+  assert.equal(failed.status, 'failed'); assert.equal(failed.reason, 'restore-failed'); assert.equal(installs, 3)
+})
+test('An unknown package list after removal does not claim the package is gone or install again', async t => {
+  let installs = 0, removed = false
+  const { updates, bundle } = await fixture(t, { schedule: later, manager: {
+    listBundles: async () => { if (removed) throw new Error('list failed'); return [bundle] },
+    installBundle: async spec => {
+      installs++
+      if (installs === 1) return { changed: false, application: 'failed', stage: 'install', target: spec, error: { code: 'already-installed' } }
+      bundle.installed = false
+      return { changed: false, application: 'failed', stage: 'install', target: spec, error: { code: 'operation-error' } }
+    },
+    removeBundle: async () => { bundle.installed = false; removed = true; return { changed: true, application: 'applied', stage: 'remove', target: PACKAGE } },
+  } })
+  const checked = await updates.check()
+  const failed = await updates.install(checked.candidate.id, randomUUID(), updates.profileKey)
+  assert.equal(failed.status, 'failed'); assert.equal(failed.reason, 'operation-error'); assert.equal(installs, 2)
 })
 test('An ordinary install does not remove the bundle on the alpha.2 path', async t => {
   let removed = 0
