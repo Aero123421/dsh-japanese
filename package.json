@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-japanese",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "DeepSeek Harnessの日本語言語パックと日本語フォント",
   "type": "module",
   "license": "MIT",

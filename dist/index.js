@@ -2475,7 +2475,7 @@ var Updates = class {
 };
 
 // src/version.ts
-var VERSION = "0.2.1";
+var VERSION = "0.2.2";
 
 // src/index.mjs
 function apply(ctx) {
