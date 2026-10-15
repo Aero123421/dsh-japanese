@@ -9,5 +9,9 @@
   "time.hours": "{n}時間",
   "time.days": "{n}日",
   "time.months": "{n}か月",
-  "time.years": "{n}年"
+  "time.years": "{n}年",
+  "fileOpen.close": "閉じる",
+  "fileOpen.failed": "「{path}」を開けませんでした。再試行するか、このメッセージを閉じてください。",
+  "fileOpen.retry": "再試行",
+  "fileOpen.title": "ファイルを開けませんでした"
 }

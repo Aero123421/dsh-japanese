@@ -4,3 +4,4 @@
 .dsh-japanese-update-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .dsh-japanese-update-page .dsh-japanese-update-muted { color: var(--dsw-alias-label-secondary); font-size: 13px; }
 .dsh-japanese-update-notes { white-space: pre-wrap; max-height: 160px; overflow: auto; }
+.dsh-japanese-update-command { font-family: var(--dsh-font-family-code, ui-monospace, monospace); font-size: 13px; line-height: 20px; overflow-wrap: anywhere; }

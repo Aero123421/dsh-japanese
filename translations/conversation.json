@@ -369,5 +369,7 @@
   "terminal.sendInput": "（入力を送信）",
   "terminal.session": "ターミナル{sessionId}",
   "row.commandArguments": "コマンドの引数",
-  "terminal.commandLine": "コマンド行 {n}"
+  "terminal.commandLine": "コマンド行 {n}",
+  "row.imageSize": "{width}x{height}px、{bytes}バイト",
+  "row.imageSizeDownscaled": "{width}x{height}px（{originalWidth}x{originalHeight}pxから縮小）、{bytes}バイト"
 }

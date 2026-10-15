@@ -2100,9 +2100,16 @@ function record(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("metadata");
   return value;
 }
+var storedCodes = ["management-required", "unaddressable", "unknown-plugin", "invalid-spec", "ambiguous-install", "not-bundle", "not-removable", "stop-profile", "bundle-in-use", "stale-approval", "incompatible-version", "operation-error", "already-installed", "settings-changed", "restore-failed"];
 function errorCode(value) {
-  const values = ["management-required", "unaddressable", "unknown-plugin", "invalid-spec", "ambiguous-install", "not-bundle", "not-removable", "stop-profile", "bundle-in-use", "stale-approval", "incompatible-version", "operation-error"];
-  return values.find((code) => code === value) ?? "operation-error";
+  return storedCodes.find((code) => code === value) ?? "operation-error";
+}
+function changeCode(result) {
+  const code = result.error?.code;
+  return typeof code === "string" ? code : void 0;
+}
+function refusal(application, code, target = PACKAGE) {
+  return { changed: false, application, stage: "install", target, ...application === "failed" ? { error: { code } } : {} };
 }
 function packageManifest(bytes) {
   const tar = gunzipSync(bytes, { maxOutputLength: 128 * 1024 * 1024 });
@@ -2181,13 +2188,19 @@ var Updates = class {
   running;
   runtime;
   fetcher;
+  schedule;
   closed = false;
   abort = new AbortController();
-  constructor(getManager, dir, running, runtime, fetcher = fetch) {
+  constructor(getManager, dir, running, runtime, fetcher = fetch, schedule) {
     this.getManager = getManager;
     this.dir = dir;
     this.running = running;
     this.runtime = runtime;
+    this.schedule = schedule ?? ((task) => {
+      queueMicrotask(() => {
+        void task();
+      });
+    });
     this.fetcher = (input, options) => fetcher(input, { ...options, signal: options?.signal ? AbortSignal.any([options.signal, this.abort.signal]) : this.abort.signal });
     this.profileKey = dir ? createHash("sha256").update(`${PACKAGE}:${dir}`).digest("hex") : null;
     this.view = { status: "idle", running, profileKey: this.profileKey };
@@ -2225,7 +2238,7 @@ var Updates = class {
   }
   fail(error, status = "failed") {
     const reason = error instanceof Error ? error.message : "operation-error";
-    const known = ["management-required", "unaddressable", "not-installed", "source-unsupported", "metadata", "metadata-size", "incompatible", "asset", "checksum", "redirect", "size", "storage", "cancelled", "candidate-changed", "settings-changed", "result-unknown", "invalid-request", "journal", "release-unavailable", "network"];
+    const known = ["management-required", "unaddressable", "not-installed", "source-unsupported", "metadata", "metadata-size", "incompatible", "asset", "checksum", "redirect", "size", "storage", "cancelled", "candidate-changed", "settings-changed", "already-installed", "restore-failed", "result-unknown", "invalid-request", "journal", "release-unavailable", "network"];
     this.view = { ...this.view, status, reason: known.includes(reason) ? reason : "operation-error" };
     return this.view;
   }
@@ -2236,22 +2249,14 @@ var Updates = class {
       this.view = { ...this.view, installed: bundle.version ?? "unknown" };
       if (!this.operation) {
         try {
-          const value = record(JSON.parse(await readFile(this.path(), "utf8")));
-          if (typeof value.id !== "string" || !/^[0-9a-f-]{36}$/.test(value.id) || typeof value.version !== "string" || !import_semver.default.valid(value.version)) throw new Error("journal");
-          const operation = { id: value.id, version: value.version };
-          if (value.result) {
-            const result = record(value.result);
-            if (!["applied", "restart-required", "overridden", "failed", "cancelled"].includes(String(result.application)) || !["install", "enable", "remove"].includes(String(result.stage))) throw new Error("journal");
-            operation.result = { changed: false, target: PACKAGE, ...result.bundle === PACKAGE ? { bundle: PACKAGE } : {}, application: result.application, stage: result.stage, ...typeof result.version === "string" ? { version: result.version } : {}, ...result.error ? { error: { code: errorCode(record(result.error).code) } } : {} };
-          }
-          this.operation = operation;
+          await this.loadJournal();
         } catch (error) {
           if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) return this.fail(error, "unknown");
         }
       }
       if (expectedId && expectedId !== this.operation?.id) return { ...this.view, status: "unknown", operation: typeof expectedId === "string" ? expectedId : "invalid" };
       if (this.operation) {
-        const result = this.operation.result ?? await this.manager.waitForInstall(brandString(this.operation.id));
+        const result = this.operation.result ?? await this.manager.waitForInstall(brandString(this.operation.id)) ?? await this.journalResult();
         if (!result) {
           this.view = { ...this.view, status: "unknown", operation: this.operation.id };
           return this.view;
@@ -2262,8 +2267,34 @@ var Updates = class {
       }
       return this.view;
     } catch (error) {
-      return this.fail(error, "unavailable");
+      return this.failOrRestore(error, "unavailable");
     }
+  }
+  async loadJournal() {
+    if (this.operation) return;
+    const value = record(JSON.parse(await readFile(this.path(), "utf8")));
+    if (typeof value.id !== "string" || !/^[0-9a-f-]{36}$/.test(value.id) || typeof value.version !== "string" || !import_semver.default.valid(value.version)) throw new Error("journal");
+    const operation = { id: value.id, version: value.version };
+    if (value.result) {
+      const result = record(value.result);
+      if (!["applied", "restart-required", "overridden", "failed", "cancelled"].includes(String(result.application)) || !["install", "enable", "remove"].includes(String(result.stage))) throw new Error("journal");
+      operation.result = { changed: false, target: PACKAGE, ...result.bundle === PACKAGE ? { bundle: PACKAGE } : {}, application: result.application, stage: result.stage, ...typeof result.version === "string" ? { version: result.version } : {}, ...result.error ? { error: { code: errorCode(record(result.error).code) } } : {} };
+    }
+    this.operation = operation;
+  }
+  async failOrRestore(error, status) {
+    if (error instanceof Error && (error.message === "not-installed" || error.message === "cancelled")) {
+      try {
+        await this.loadJournal();
+      } catch {
+      }
+      if (this.operation?.result && changeCode(this.operation.result) === "restore-failed") {
+        const { installed: _installed, reason: _reason, ...previous } = this.view;
+        this.view = { ...previous, status: "failed", reason: "restore-failed", operation: this.operation.id, stage: this.operation.result.stage };
+        return this.view;
+      }
+    }
+    return this.fail(error, status);
   }
   result(result, installed) {
     const operation = this.operation;
@@ -2291,7 +2322,7 @@ var Updates = class {
         this.view = { status: import_semver.default.gt(candidate.version, bundle.version ?? this.running) ? "available" : "current", running: this.running, profileKey: this.profileKey, candidate, checkedAt: (/* @__PURE__ */ new Date()).toISOString() };
         return this.view;
       } catch (error) {
-        return this.fail(error, error instanceof Error && error.message === "incompatible" ? "incompatible" : "failed");
+        return this.failOrRestore(error, error instanceof Error && error.message === "incompatible" ? "incompatible" : "failed");
       }
     })().finally(() => {
       this.pending = void 0;
@@ -2334,24 +2365,112 @@ var Updates = class {
         if (latest.source !== before.source || latest.enabled !== before.enabled) throw new Error("settings-changed");
         if (this.closed) throw new Error("cancelled");
         started = true;
-        const result = await this.manager.installBundle(spec, { enabled: before.enabled, requestId: brandString(operationId) });
+        const manager = this.manager;
+        let result = await manager.installBundle(spec, { enabled: before.enabled, requestId: brandString(operationId) });
+        if (changeCode(result) === "already-installed") result = await this.replaceInstalled(manager, spec, before, operationId);
         this.operation.result = result;
         await this.save();
-        const after = await this.bundle();
-        return this.result(result, after.version);
+        let installed = result.version;
+        try {
+          installed = (await this.bundle()).version;
+        } catch {
+        }
+        return this.result(result, installed);
       } catch (error) {
         if (admitted && this.operation && this.operation.id === operationId && !this.operation.result && !started) {
           this.operation.result = { changed: false, application: "failed", target: PACKAGE, stage: "install", error: { code: "operation-error" } };
           await this.save().catch(() => {
           });
         }
-        return this.fail(error, this.operation && !this.operation.result ? "unknown" : "failed");
+        return this.failOrRestore(error, this.operation && !this.operation.result ? "unknown" : "failed");
       }
     })().finally(() => {
       this.pending = void 0;
       this.pendingOperation = void 0;
     });
     return this.pending;
+  }
+  async journalResult() {
+    if (!this.operation) return void 0;
+    try {
+      const value = record(JSON.parse(await readFile(this.path(), "utf8")));
+      if (value.id !== this.operation.id || !value.result) return void 0;
+      const parsed = record(value.result);
+      if (!["applied", "restart-required", "overridden", "failed", "cancelled"].includes(String(parsed.application)) || !["install", "enable", "remove"].includes(String(parsed.stage))) return void 0;
+      return { changed: false, target: PACKAGE, ...parsed.bundle === PACKAGE ? { bundle: PACKAGE } : {}, application: parsed.application, stage: parsed.stage, ...typeof parsed.version === "string" ? { version: parsed.version } : {}, ...parsed.error ? { error: { code: errorCode(record(parsed.error).code) } } : {} };
+    } catch {
+      return void 0;
+    }
+  }
+  replaceInstalled(manager, spec, before, operationId) {
+    const remove = manager.removeBundle;
+    if (remove === void 0) return Promise.resolve(refusal("failed", "already-installed", spec));
+    const enabled = before.enabled;
+    const previous = before.source;
+    return new Promise((resolve2, reject) => {
+      try {
+        this.schedule(() => this.runReplacement(manager, remove, spec, enabled, previous, operationId).then(resolve2, reject));
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error("operation-error"));
+      }
+    }).catch(() => refusal("failed", "operation-error", spec));
+  }
+  async runReplacement(manager, remove, spec, enabled, previous, operationId) {
+    if (this.closed) return refusal("cancelled", "operation-error");
+    let removed;
+    try {
+      const current = (await manager.listBundles()).find((row) => row.name === PACKAGE);
+      if (!current?.installed || current.enabled !== enabled || current.source !== previous) return refusal("failed", "settings-changed");
+      removed = await remove(PACKAGE);
+      if (removed.application !== "applied" && removed.application !== "restart-required") return removed;
+      const installed = await manager.installBundle(spec, { enabled, requestId: brandString(operationId) });
+      return this.restoreIfMissing(manager, installed, enabled, previous);
+    } catch {
+      if (removed && previous !== void 0) return this.restoreIfMissing(manager, refusal("failed", "operation-error"), enabled, previous);
+      return refusal("failed", "operation-error");
+    }
+  }
+  restoreCommitted(result) {
+    if (result.application !== "applied" && result.application !== "restart-required") return false;
+    if (result.error) return false;
+    const outcome = result.packageResult;
+    return !outcome || outcome.exitCode === 0 && !outcome.timedOut;
+  }
+  async restoreIfMissing(manager, installed, enabled, previous) {
+    if (previous === void 0 || installed.application !== "failed" && installed.application !== "cancelled" || changeCode(installed) === "already-installed") return installed;
+    let present;
+    try {
+      present = (await manager.listBundles()).some((row) => row.name === PACKAGE && row.installed);
+    } catch {
+      return installed;
+    }
+    if (present || !this.operation) return installed;
+    this.operation.result = installed;
+    try {
+      await this.save();
+    } catch {
+    }
+    let restored;
+    try {
+      restored = await manager.installBundle(previous, { enabled, requestId: brandString(randomUUID()) });
+    } catch {
+      restored = void 0;
+    }
+    let listed;
+    try {
+      listed = (await manager.listBundles()).some((row) => row.name === PACKAGE && row.installed);
+    } catch {
+      listed = void 0;
+    }
+    const committed = restored !== void 0 && (changeCode(restored) === "already-installed" || this.restoreCommitted(restored));
+    if (listed === true || committed && listed === void 0) return installed;
+    const failed = refusal("failed", "restore-failed");
+    this.operation.result = failed;
+    try {
+      await this.save();
+    } catch {
+    }
+    return failed;
   }
 };
 

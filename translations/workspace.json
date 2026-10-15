@@ -114,5 +114,8 @@
   "time.years": "{n}年",
   "time.ago": "{t}前",
   "toast.forkRequiresOpen": "元のセッションを開いてデータを移行してから、分岐を作成してください。",
-  "toast.openForkSource": "元のセッションを開く"
+  "toast.openForkSource": "元のセッションを開く",
+  "menu.sessionId": "セッションIDをコピー",
+  "toast.sessionIdCopied": "セッションIDをコピーしました",
+  "toast.sessionIdCopyFailed": "コピーできませんでした。再試行してください。"
 }

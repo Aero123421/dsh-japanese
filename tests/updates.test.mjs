@@ -8,6 +8,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { Updates, getCandidate, PACKAGE, REPOSITORY, supportsSource } from '../src/updates.ts'
 import { boundedFetch } from '../src/update-download.ts'
 import { UpdateController } from '../src/update-controller.ts'
+import { en, ja } from '../src/update-copy.mjs'
 const PROFILE_KEY = 'a'.repeat(64)
 const runtime = '0.2.1-alpha.2'
 const version = '0.4.0', tag = 'v'+version, filename = `local-dsh-japanese-${version}.tgz`
@@ -34,7 +35,7 @@ async function fixture(t, options = {}) {
   }
   const calls = []
   const manager = { listBundles: async () => [bundle], waitForInstall: async () => null, installBundle: async (spec, config) => { calls.push({ spec, config }); bundle.version = version; if (!spec.startsWith('github:')) bundle.source = `file:${spec}`; return { changed: true, application: 'restart-required', stage: 'install', target: spec, version, bundle: PACKAGE, ...options.result } }, ...options.manager }
-  const updates = new Updates(() => manager, dir, '0.2.0', runtime, options.fetcher ?? fetcher())
+  const updates = new Updates(() => manager, dir, '0.2.0', runtime, options.fetcher ?? fetcher(), options.schedule)
   return { dir, bundle, calls, manager, updates }
 }
 test('Strict official metadata, channel, SemVer and compatibility', async () => {
@@ -247,6 +248,156 @@ test('Different or missing expected profile identity cannot admit an installatio
   await assert.rejects(updates.install(checked.candidate.id, randomUUID(), 'b'.repeat(64)), /profile-changed/)
   await assert.rejects(updates.install(checked.candidate.id, randomUUID(), undefined), /profile-changed/)
   assert.equal(calls.length, 0)
+})
+test('Update copy keeps the same English and Japanese keys', () => {
+  assert.deepEqual(Object.keys(en).sort(), Object.keys(ja).sort())
+})
+const later = task => { queueMicrotask(() => { void task() }) }
+test('HMR already-installed removes on a later turn, then installs while staying disabled', async t => {
+  const seen = []
+  let installs = 0, removed = 0, atSchedule = -1
+  const { updates, bundle } = await fixture(t, { schedule: task => { atSchedule = removed; later(task) }, manager: {
+    installBundle: async (spec, config) => {
+      installs++; seen.push({ spec, config })
+      if (installs === 1) return { changed: false, application: 'failed', stage: 'install', target: spec, error: { code: 'already-installed' } }
+      bundle.version = version; bundle.source = spec; bundle.installed = true
+      return { changed: true, application: 'applied', stage: 'install', target: spec, version, bundle: PACKAGE }
+    },
+    removeBundle: async name => { removed++; assert.equal(name, PACKAGE); bundle.installed = false; return { changed: true, application: 'applied', stage: 'remove', target: name } },
+  } })
+  const checked = await updates.check()
+  const result = await updates.install(checked.candidate.id, randomUUID(), updates.profileKey)
+  assert.equal(atSchedule, 0); assert.equal(result.status, 'restart-required'); assert.equal(removed, 1); assert.equal(installs, 2)
+  assert.equal(seen[1].config.enabled, false); assert.equal(seen[1].spec, `github:${REPOSITORY}#${tag}`)
+})
+test('Stopping this plugin during removal does not cancel the install that follows it', async t => {
+  const holder = {}
+  let installs = 0
+  holder.current = await fixture(t, { schedule: later, manager: {
+    installBundle: async spec => {
+      installs++
+      if (installs === 1) return { changed: false, application: 'failed', stage: 'install', target: spec, error: { code: 'already-installed' } }
+      holder.current.bundle.version = version; holder.current.bundle.installed = true
+      return { changed: true, application: 'applied', stage: 'install', target: spec, version, bundle: PACKAGE }
+    },
+    removeBundle: async () => { holder.current.updates.dispose(); return { changed: true, application: 'applied', stage: 'remove', target: PACKAGE } },
+  } })
+  const checked = await holder.current.updates.check()
+  assert.equal((await holder.current.updates.install(checked.candidate.id, randomUUID(), holder.current.updates.profileKey)).status, 'restart-required')
+  assert.equal(installs, 2)
+})
+test('A failed removal is not followed by another install', async t => {
+  let installs = 0
+  const { updates } = await fixture(t, { schedule: later, manager: {
+    installBundle: async spec => { installs++; return { changed: false, application: 'failed', stage: 'install', target: spec, error: { code: 'already-installed' } } },
+    removeBundle: async () => ({ changed: false, application: 'failed', stage: 'remove', target: PACKAGE, error: { code: 'not-removable' } }),
+  } })
+  const checked = await updates.check()
+  const result = await updates.install(checked.candidate.id, randomUUID(), updates.profileKey)
+  assert.equal(result.status, 'failed'); assert.equal(result.reason, 'not-removable'); assert.equal(installs, 1)
+})
+test('A missing removeBundle reports already-installed and does not throw', async t => {
+  const { updates } = await fixture(t, { manager: { installBundle: async spec => ({ changed: false, application: 'failed', stage: 'install', target: spec, error: { code: 'already-installed' } }) } })
+  const checked = await updates.check()
+  const result = await updates.install(checked.candidate.id, randomUUID(), updates.profileKey)
+  assert.equal(result.status, 'failed'); assert.equal(result.reason, 'already-installed')
+})
+test('Disposing before the replacement task runs does not remove the package', async t => {
+  const holder = {}
+  let removed = 0
+  holder.current = await fixture(t, { schedule: task => { holder.current.updates.dispose(); return task() }, manager: {
+    installBundle: async spec => ({ changed: false, application: 'failed', stage: 'install', target: spec, error: { code: 'already-installed' } }),
+    removeBundle: async () => { removed++; return { changed: true, application: 'applied', stage: 'remove', target: PACKAGE } },
+  } })
+  const { updates } = holder.current
+  const checked = await updates.check()
+  assert.equal((await updates.install(checked.candidate.id, randomUUID(), updates.profileKey)).status, 'cancelled')
+  assert.equal(removed, 0)
+})
+test('A failed replacement restores the previous spec when the package is gone', async t => {
+  const seen = []
+  let installs = 0
+  const { updates, bundle, dir, manager } = await fixture(t, { schedule: later, manager: {
+    installBundle: async (spec, config) => {
+      installs++; seen.push({ spec, config })
+      if (installs === 1) return { changed: false, application: 'failed', stage: 'install', target: spec, error: { code: 'already-installed' } }
+      if (installs === 2) { bundle.installed = false; return { changed: false, application: 'failed', stage: 'install', target: spec, error: { code: 'operation-error' } } }
+      bundle.installed = true
+      return { changed: true, application: 'applied', stage: 'install', target: spec, version: '0.2.0', bundle: PACKAGE }
+    },
+    removeBundle: async () => { bundle.installed = false; return { changed: true, application: 'applied', stage: 'remove', target: PACKAGE } },
+  } })
+  const checked = await updates.check(), id = randomUUID()
+  const restored = await updates.install(checked.candidate.id, id, updates.profileKey)
+  assert.equal(restored.status, 'failed'); assert.equal(restored.reason, 'operation-error'); assert.equal(installs, 3)
+  assert.equal(seen[2].spec, `github:${REPOSITORY}#v0.2.0`); assert.equal(seen[2].config.enabled, false)
+  const reloaded = new Updates(() => manager, dir, '0.2.0', runtime, fetcher())
+  assert.equal((await reloaded.status()).status, 'failed'); assert.equal((await reloaded.status()).reason, 'operation-error'); assert.equal((await reloaded.status()).operation, id)
+})
+test('A failed restore reports that the previous package is missing and how to reinstall', async t => {
+  const seen = []
+  let installs = 0
+  const { updates, bundle, dir, manager } = await fixture(t, { schedule: later, manager: {
+    installBundle: async (spec, config) => {
+      installs++; seen.push({ spec, config })
+      if (installs === 1) return { changed: false, application: 'failed', stage: 'install', target: spec, error: { code: 'already-installed' } }
+      bundle.installed = false
+      return { changed: false, application: 'failed', stage: 'install', target: spec, error: { code: 'operation-error' } }
+    },
+    removeBundle: async () => { bundle.installed = false; return { changed: true, application: 'applied', stage: 'remove', target: PACKAGE } },
+  } })
+  const checked = await updates.check(), id = randomUUID()
+  const failed = await updates.install(checked.candidate.id, id, updates.profileKey)
+  assert.equal(failed.status, 'failed'); assert.equal(failed.reason, 'restore-failed'); assert.equal(installs, 3)
+  assert.equal(seen[2].spec, `github:${REPOSITORY}#v0.2.0`); assert.equal(seen[2].config.enabled, false)
+  assert.match(ja['restore-failed'], /以前の版も戻せませんでした/)
+  assert.match(ja['restore-failed'], /github:Aero123421\/dsh-japanese/)
+  assert.match(ja['restore-failed'], /プラグインを追加/)
+  assert.equal(ja['restore-failed-command'], 'dsh plugin --profile web add -w github:Aero123421/dsh-japanese')
+  assert.match(en['restore-failed'], /previous version could not be restored/)
+  assert.equal(en['restore-failed-command'], ja['restore-failed-command'])
+  const reloaded = new Updates(() => manager, dir, '0.2.0', runtime, fetcher())
+  const again = await reloaded.status()
+  assert.equal(again.status, 'failed'); assert.equal(again.reason, 'restore-failed'); assert.equal(again.operation, id)
+  assert.equal((await reloaded.check()).reason, 'restore-failed')
+})
+test('A thrown restore install is not reported as the original install failure', async t => {
+  let installs = 0
+  const { updates, bundle } = await fixture(t, { schedule: later, manager: {
+    installBundle: async spec => {
+      installs++
+      if (installs === 1) return { changed: false, application: 'failed', stage: 'install', target: spec, error: { code: 'already-installed' } }
+      if (installs === 2) { bundle.installed = false; return { changed: false, application: 'failed', stage: 'install', target: spec, error: { code: 'operation-error' } } }
+      throw new Error('restore exploded')
+    },
+    removeBundle: async () => { bundle.installed = false; return { changed: true, application: 'applied', stage: 'remove', target: PACKAGE } },
+  } })
+  const checked = await updates.check()
+  const failed = await updates.install(checked.candidate.id, randomUUID(), updates.profileKey)
+  assert.equal(failed.status, 'failed'); assert.equal(failed.reason, 'restore-failed'); assert.equal(installs, 3)
+})
+test('An unknown package list after removal does not claim the package is gone or install again', async t => {
+  let installs = 0, removed = false
+  const { updates, bundle } = await fixture(t, { schedule: later, manager: {
+    listBundles: async () => { if (removed) throw new Error('list failed'); return [bundle] },
+    installBundle: async spec => {
+      installs++
+      if (installs === 1) return { changed: false, application: 'failed', stage: 'install', target: spec, error: { code: 'already-installed' } }
+      bundle.installed = false
+      return { changed: false, application: 'failed', stage: 'install', target: spec, error: { code: 'operation-error' } }
+    },
+    removeBundle: async () => { bundle.installed = false; removed = true; return { changed: true, application: 'applied', stage: 'remove', target: PACKAGE } },
+  } })
+  const checked = await updates.check()
+  const failed = await updates.install(checked.candidate.id, randomUUID(), updates.profileKey)
+  assert.equal(failed.status, 'failed'); assert.equal(failed.reason, 'operation-error'); assert.equal(installs, 2)
+})
+test('An ordinary install does not remove the bundle on the alpha.2 path', async t => {
+  let removed = 0
+  const { updates } = await fixture(t, { manager: { removeBundle: async () => { removed++; throw new Error('remove') } } })
+  const checked = await updates.check()
+  assert.equal((await updates.install(checked.candidate.id, randomUUID(), updates.profileKey)).status, 'restart-required')
+  assert.equal(removed, 0)
 })
 test('Authoritative cancellation preserves its outcome after the installer abort exit', async t => {
   const { updates } = await fixture(t, { result: { application: 'cancelled', packageResult: { exitCode: 130, timedOut: false } } })

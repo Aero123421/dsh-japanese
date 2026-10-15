@@ -12,10 +12,10 @@ window.mountPlugin = async () => {
   const ctx = new Context()
   const locale = new LocaleRuntime(ctx)
   ctx.provide('locale', locale)
-  let installs = 0, updateState = 'unavailable'
+  let installs = 0, updateState = 'unavailable', updateReason = ''
   if (!location.search.includes('no-connection')) ctx.provide('connection', { rpc: { call: async (_base, method, payload) => {
-    if (method.endsWith('update-install')) { installs++; updateState = 'restart-required' }
-    return { ok: true, value: { status: updateState, running: VERSION, profileKey: 'a'.repeat(64), ...(updateState === 'available' ? { candidate: { id: 'fixture', version: '0.3.0', notes: '更新の説明', url: 'https://github.com/Aero123421/dsh-japanese/releases/tag/v0.3.0', runtime: '0.2.1-alpha.2' } } : {}), ...(payload.operationId ? { operation: payload.operationId } : {}) } }
+    if (method.endsWith('update-install')) { installs++; updateState = 'restart-required'; updateReason = '' }
+    return { ok: true, value: { status: updateState, running: VERSION, profileKey: 'a'.repeat(64), ...(updateReason ? { reason: updateReason, stage: 'install' } : {}), ...(updateState === 'available' ? { candidate: { id: 'fixture', version: '0.3.0', notes: '更新の説明', url: 'https://github.com/Aero123421/dsh-japanese/releases/tag/v0.3.0', runtime: '0.2.1-alpha.2' } } : {}), ...(payload.operationId ? { operation: payload.operationId } : {}) } }
   } } })
   const root = ctx.plugin(renderer); await root.await()
   const absent = Object.freeze({ key: undefined, hooks: {}, keyedHooks: {}, props: {} })
@@ -38,5 +38,5 @@ window.mountPlugin = async () => {
   const fiber = ctx.plugin(plugin); await fiber.await()
   locale.setLocale('ja'); sync()
   const unmount = ctx.uiRenderer.mount(document.getElementById('app'))
-  window.testRuntime = { ctx, locale, installs: () => installs, setUpdate: async status => { updateState = status; ctx.emit('connection/reset') }, unload: async () => { await fiber.dispose() }, dispose: async () => { unmount(); await root.dispose(); await ctx.fiber.dispose() } }
+  window.testRuntime = { ctx, locale, installs: () => installs, setUpdate: async (status, reason = '') => { updateState = status; updateReason = reason; ctx.emit('connection/reset') }, unload: async () => { await fiber.dispose() }, dispose: async () => { unmount(); await root.dispose(); await ctx.fiber.dispose() } }
 }
