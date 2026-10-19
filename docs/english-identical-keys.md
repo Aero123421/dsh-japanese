@@ -31,7 +31,7 @@ rc.2 の公式 UI 2664 キーを、日本語の値と英語の値で比べた結
 | `chat.message.stepProcess.sharedPrefix` | （空） | 空文字。語がない |
 | `chat.message.turnProcess.separator` | ` · ` | 区切りの中黒 |
 | `chat.number.groupSeparator` | `,` | 桁区切りの記号 |
-| `command.token.compact` | `compact` | 補完の挿入文字。`resolution.ts` の `claimToken`（36行）が作り、`TOKEN_ALIASES`（39〜42行）は en/zh だけを受ける。一覧の表示名 `label.compact` は「簡潔」 |
+| `command.token.compact` | `compact` | 補完の挿入文字。`resolution.ts` の `claimToken`（36行）が作り、`TOKEN_ALIASES`（39〜42行）は en/zh だけを受ける。一覧の表示名 `label.compact` は「会話を圧縮」 |
 | `command.token.export` | `export` | 補完の挿入文字。同上。一覧の表示名 `label.export` は「エクスポート」 |
 | `command.token.feedback` | `feedback` | 補完の挿入文字。同上。一覧の表示名 `label.feedback` は「フィードバック」 |
 | `command.token.goal` | `goal` | 補完の挿入文字。同上。一覧の表示名 `label.goal` は「目標」 |

@@ -3,7 +3,7 @@
   "section.commands": "コマンド",
   "label.goal": "目標",
   "label.plan": "計画",
-  "label.compact": "簡潔",
+  "label.compact": "会話を圧縮",
   "label.permission": "権限",
   "label.export": "エクスポート",
   "description.goal": "長時間のタスクの目標を設定・表示",
