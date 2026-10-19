@@ -4,6 +4,7 @@ import { readFile, mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import assert from 'node:assert/strict'
 import { compileOfficial } from './upstream.mjs'
+import { fontFileName } from '../src/fonts.mjs'
 
 await mkdir('artifacts', { recursive: true })
 await compileOfficial('scripts/browser-fixture.jsx', '.cache/browser-fixture.js', 'browser')
@@ -16,8 +17,8 @@ const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url, 'http://127.0.0.1')
     if (url.pathname.startsWith('/dsh-japanese/fonts/')) {
-      const name = url.pathname.slice('/dsh-japanese/fonts/'.length)
-      if (!/^noto-sans-jp-[0-9]+-wght-normal\.woff2$/.test(name)) { response.writeHead(404); response.end(); return }
+      const name = fontFileName(url.pathname)
+      if (!name) { response.writeHead(404); response.end(); return }
       response.setHeader('content-type', 'font/woff2')
       response.end(await readFile(resolve('dist/fonts', name))); return
     }
@@ -38,7 +39,9 @@ try {
   const page = await browser.newPage({ viewport: { width: 1000, height: 800 } })
   const errors = []; page.on('pageerror', error => errors.push(error.message))
   const fontUrls = []
+  const fontStatuses = []
   page.on('request', request => { if (/\.woff2|fonts\.gstatic|fonts\.google/.test(request.url())) fontUrls.push(request.url()) })
+  page.on('response', response => { if (response.url().includes('/dsh-japanese/fonts/')) fontStatuses.push(response.status()) })
   const english = await browser.newPage()
   const englishFonts = []
   english.on('request', request => { if (/\.woff2|fonts\.gstatic|fonts\.google/.test(request.url())) englishFonts.push(request.url()) })
@@ -65,6 +68,8 @@ try {
   const { fonts } = await cdp.send('CSS.getPlatformFontsForNode', { nodeId })
   assert.ok(fonts.length > 0 && fonts.every(font => font.isCustomFont), 'Japanese glyphs must use bundled fonts')
   assert.ok(fontUrls.length > 0 && fontUrls.every(url => url.startsWith(`http://127.0.0.1:${server.address().port}/dsh-japanese/fonts/`)), 'Japanese fonts must come from this host')
+  assert.ok(fontStatuses.length > 0 && fontStatuses.every(status => status === 200), 'Japanese font responses must be 200')
+  assert.ok(fontUrls.some(url => url.endsWith('/noto-sans-jp-latin-wght-normal.woff2')))
   await page.screenshot({ path: 'artifacts/japanese-light.png' })
   await page.evaluate(() => document.body.setAttribute('data-ds-dark-theme', ''))
   await page.screenshot({ path: 'artifacts/japanese-dark.png' })
