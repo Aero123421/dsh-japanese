@@ -19,6 +19,18 @@ test('all pinned official UI keys and placeholders have Japanese translations', 
     }
   }
 })
+test('Japanese text matches English only for keys on the allowlist', async () => {
+  const allowlist = JSON.parse(await readFile(new URL('./fixtures/english-identical-allowlist.json', import.meta.url), 'utf8'))
+  const identical = []
+  for (const [namespace, english] of Object.entries(contract)) {
+    const japanese = JSON.parse(await readFile(new URL(`../translations/${namespace}.json`, import.meta.url), 'utf8'))
+    for (const [key, text] of Object.entries(english)) {
+      if (japanese[key] === text) identical.push(`${namespace}.${key}`)
+    }
+  }
+  identical.sort()
+  assert.deepEqual(identical, [...allowlist].sort())
+})
 test('Japanese placeholders are valid in each supported version en dictionary', async () => {
   // alpha.2 and alpha.3 pass {peers}; rc.2 passes {requirements}. alpha.2's
   // restart sentences have no {reason}. One Japanese sentence omits a name

@@ -77,7 +77,7 @@
   "registryCustomHint": "http://またはhttps://で始まる社内・プライベートのnpmレジストリを入力してください。ログインが必要な場合は、このマシンの~/.npmrcに認証情報を保存してください。",
   "registryCustomInvalid": "http://またはhttps://で始まるアドレスを入力",
   "registryListSeparator": "、",
-  "sentenceSeparator": " ",
+  "sentenceSeparator": "",
   "installRun": "インストール",
   "installChecking": "確認中…",
   "installProblemInvalid": "インストール可能なパッケージ名またはアドレスではありません: {reason}",

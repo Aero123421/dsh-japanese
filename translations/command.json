@@ -11,11 +11,11 @@
   "description.compact": "古い会話履歴を圧縮",
   "description.permission": "権限プリセットを切り替え（サンドボックスと承認方針）",
   "description.export": "このセッションのログをZIPでダウンロード",
-  "token.goal": "goal",
-  "token.plan": "plan",
+  "token.goal": "目標",
+  "token.plan": "計画",
   "token.compact": "圧縮",
-  "token.permission": "permission",
-  "token.export": "export",
+  "token.permission": "権限",
+  "token.export": "エクスポート",
   "search.placeholder": "検索…",
   "search.aria": "選択肢を絞り込み",
   "status.loading": "選択肢を読み込んでいます…",
@@ -26,5 +26,5 @@
   "notice.attachmentsUnsupported": "/{command}は添付ファイルに対応していません。先に削除してください",
   "label.feedback": "フィードバック",
   "description.feedback": "このセッションへのフィードバックを記録",
-  "token.feedback": "feedback"
+  "token.feedback": "フィードバック"
 }
