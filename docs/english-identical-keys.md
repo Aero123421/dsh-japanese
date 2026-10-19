@@ -2,17 +2,14 @@
 
 rc.2 の公式 UI 2664 キーを、日本語の値と英語の値で比べた結果です。値が英語と同一だったのは 99 件で、JA-1 の 109 キーも含みます。欠けは 0 件です。
 
-(b) の 11 件は訳しました。残る 88 件は (a) で、`tests/fixtures/english-identical-allowlist.json` にあります。`tests/translations.test.mjs` の `Japanese text matches English only for keys on the allowlist` が、英語と同一のキーはこの一覧だけであることを確認します。CI のジョブ `japanese` の `npm test` で実行されます。
+コマンドの `token.*` 6 件は英語に戻しました。補完で選ぶと `claimToken` がその文字を入力欄へ入れますが、受け付ける別名は本体の英語と中国語だけです。許可リストは 94 件で、`tests/fixtures/english-identical-allowlist.json` にあります。`tests/translations.test.mjs` の `Japanese text matches English only for keys on the allowlist` と `Japanese command tokens match the English tokens` が、CI のジョブ `japanese` の `npm test` で実行されます。
 
 ## (b) 訳したキー
 
+表示だけに使う 6 件です。
+
 | キー | 英語 | 日本語 | 理由 |
 | --- | --- | --- | --- |
-| `command.token.goal` | `goal` | `目標` | メニューで選んだときと、/ のあとに打てる名前。項目名の「目標」に合わせた。英語の /goal もそのまま使える |
-| `command.token.plan` | `plan` | `計画` | 項目名の「計画」に合わせた。英語の /plan もそのまま使える |
-| `command.token.feedback` | `feedback` | `フィードバック` | 項目名の「フィードバック」に合わせた |
-| `command.token.permission` | `permission` | `権限` | 項目名の「権限」に合わせた |
-| `command.token.export` | `export` | `エクスポート` | 項目名の「エクスポート」に合わせた |
 | `conversation.tool.title.bash` | `Bash` | `コマンドを実行` | ほかのツール名は動作の説明になっている。公式の中国語は「运行命令」 |
 | `conversation.tool.title.pwsh` | `Pwsh` | `コマンドを実行` | Bash と同じ動作の説明。公式の中国語も両方を「运行命令」にしている |
 | `conversation.tool.title.grep` | `Grep` | `ファイル内容を検索` | ファイルの中身を探す動作。公式の中国語は「搜索文件内容」 |
@@ -24,7 +21,7 @@ rc.2 の公式 UI 2664 キーを、日本語の値と英語の値で比べた結
 
 ## (a) 訳さないキー
 
-画面に出ても、固有名詞、製品名、URL、コード、数値、単位、書式、置換項目だけで、訳す語がないものです。
+固有名詞、製品名、URL、コード、数値、単位、書式、置換項目に加え、補完が入力欄へ入れるコマンド名です。一覧の表示名は `label.*` のまま日本語です。
 
 | キー | 英語 | 分類 |
 | --- | --- | --- |
@@ -34,6 +31,12 @@ rc.2 の公式 UI 2664 キーを、日本語の値と英語の値で比べた結
 | `chat.message.stepProcess.sharedPrefix` | （空） | 空文字。語がない |
 | `chat.message.turnProcess.separator` | ` · ` | 区切りの中黒 |
 | `chat.number.groupSeparator` | `,` | 桁区切りの記号 |
+| `command.token.compact` | `compact` | 補完の挿入文字。`resolution.ts` の `claimToken`（36行）が作り、`TOKEN_ALIASES`（39〜42行）は en/zh だけを受ける。一覧の表示名 `label.compact` は「簡潔」 |
+| `command.token.export` | `export` | 補完の挿入文字。同上。一覧の表示名 `label.export` は「エクスポート」 |
+| `command.token.feedback` | `feedback` | 補完の挿入文字。同上。一覧の表示名 `label.feedback` は「フィードバック」 |
+| `command.token.goal` | `goal` | 補完の挿入文字。同上。一覧の表示名 `label.goal` は「目標」 |
+| `command.token.permission` | `permission` | 補完の挿入文字。同上。一覧の表示名 `label.permission` は「権限」 |
+| `command.token.plan` | `plan` | 補完の挿入文字。同上。一覧の表示名 `label.plan` は「計画」 |
 | `common.json.label` | `JSON` | 形式名 JSON |
 | `common.number.million` | `{value}M` | 単位 M |
 | `common.number.thousand` | `{value}K` | 単位 K |

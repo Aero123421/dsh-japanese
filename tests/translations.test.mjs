@@ -19,6 +19,16 @@ test('all pinned official UI keys and placeholders have Japanese translations', 
     }
   }
 })
+test('Japanese command tokens match the English tokens', async () => {
+  const japanese = JSON.parse(await readFile(new URL('../translations/command.json', import.meta.url), 'utf8'))
+  const tokens = Object.keys(contract.command).filter(key => key.startsWith('token.'))
+  assert.deepEqual(tokens.sort(), ['token.compact', 'token.export', 'token.feedback', 'token.goal', 'token.permission', 'token.plan'])
+  for (const key of tokens) assert.equal(japanese[key], contract.command[key], key)
+  assert.equal(japanese['label.goal'], '目標')
+  assert.equal(japanese['label.plan'], '計画')
+  assert.notEqual(japanese['label.goal'], contract.command['label.goal'])
+  assert.notEqual(japanese['label.plan'], contract.command['label.plan'])
+})
 test('Japanese text matches English only for keys on the allowlist', async () => {
   const allowlist = JSON.parse(await readFile(new URL('./fixtures/english-identical-allowlist.json', import.meta.url), 'utf8'))
   const identical = []
