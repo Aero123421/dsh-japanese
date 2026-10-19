@@ -1,12 +1,56 @@
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { getDshRuntimeVersion } from '@deepseek-ai/dsh-app-boot'
 import { Updates } from './updates.ts'
 import { VERSION } from './version.ts'
+import { FONT_ROUTE, fontFileName } from './fonts.mjs'
 
 export function apply(ctx) {
   const updates = new Updates(() => ctx.get('pluginManager'), ctx.get('profileContext')?.dir, VERSION, getDshRuntimeVersion())
   ctx.effect(() => () => updates.dispose())
   // Connection authenticates these routes just like the standard management UI.
   // Missing services only remove updating; Client dictionaries remain independent.
+  // The font files are public OFL assets. A named route is reachable with the
+  // page cookie and also without one, so a path-preserving public URL can load
+  // them. The stylesheet only references this path while html lang is ja.
+  ctx.inject(['webServer'], child => {
+    const directory = fileURLToPath(new URL('./fonts/', import.meta.url))
+    child.effect(() => child.webServer.register({
+      kind: 'prefix',
+      path: FONT_ROUTE,
+      async handler(request, response) {
+        if (request.method !== 'GET' && request.method !== 'HEAD') {
+          response.writeHead(405)
+          response.end()
+          return
+        }
+        let pathname = '/'
+        try { pathname = new URL(request.url ?? '/', 'http://127.0.0.1').pathname } catch { /* malformed URL */ }
+        const name = fontFileName(pathname)
+        if (name === undefined) {
+          response.writeHead(404)
+          response.end()
+          return
+        }
+        try {
+          const body = await readFile(join(directory, name))
+          response.writeHead(200, {
+            'content-type': 'font/woff2',
+            'content-length': String(body.length),
+            'cache-control': 'public, max-age=31536000, immutable',
+          })
+          if (request.method === 'HEAD') response.end()
+          else response.end(body)
+        } catch {
+          if (!response.headersSent) {
+            response.writeHead(404)
+            response.end()
+          }
+        }
+      },
+    }), 'dsh-japanese: fonts')
+  })
   ctx.inject(['connection'], child => {
     for (const method of ['status', 'check', 'install']) {
       const endpoint = `dsh-japanese-updates/update-${method}`

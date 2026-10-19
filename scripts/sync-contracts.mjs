@@ -1,8 +1,10 @@
 import ts from 'typescript'
 import { readFile, readdir, writeFile } from 'node:fs/promises'
 import { resolve, dirname } from 'node:path'
-import { ensureUpstream, upstreamRoot } from './upstream.mjs'
-await ensureUpstream()
+import { ensureUpstream, upstreamRoot as pinnedRoot } from './upstream.mjs'
+const output = process.argv[2] ?? 'tests/fixtures/upstream-dictionaries.json'
+const upstreamRoot = process.env.UPSTREAM_ROOT ?? pinnedRoot
+if (!process.env.UPSTREAM_ROOT) await ensureUpstream()
 const modules = new Map()
 async function parse(file) {
  if(modules.has(file))return modules.get(file)
@@ -67,5 +69,5 @@ for(const folder of ['packages/client','packages/extensions/ui-cordis','packages
 for(const [ns,file,name] of [['common','packages/client/locale/src/locales/en.ts','en'],['settings.locale','packages/client/locale/src/locales/settings.ts','en'],['chat','packages/client/ui-chat/src/client/locale.ts','en']]){
  const path=resolve(upstreamRoot,file);contract[ns]=await value(path,(await parse(path)).constants.get(name))
 }
-await writeFile('tests/fixtures/upstream-dictionaries.json',JSON.stringify(Object.fromEntries(Object.entries(contract).sort()),null,2)+'\n')
+await writeFile(output,JSON.stringify(Object.fromEntries(Object.entries(contract).sort()),null,2)+'\n')
 console.log(`Official dictionary contract: ${Object.keys(contract).length} namespaces, ${Object.values(contract).reduce((n,dict)=>n+Object.keys(dict).length,0)} keys`)

@@ -1,5 +1,6 @@
 import { registerUpdatePage } from './update-page.jsx'
 import { registerJapaneseDictionaries } from './register-dictionaries.mjs'
+import { watchJapaneseLanguage } from './language.mjs'
 import dictionaries from '../.cache/translations.json'
 import fontCss from '../.cache/font-css.mjs'
 
@@ -16,15 +17,27 @@ html:lang(ja) body {
 
 export function apply(ctx) {
   ctx.inject(['slots', 'connection'], child => registerUpdatePage(child))
-  if (!ctx.locale.getSnapshot().locales.some(locale => locale.id === 'ja')) {
-    ctx.effect(() => ctx.locale.addLanguage({ id: 'ja', label: '日本語', fallback: 'en' }), 'dsh-japanese: language')
-  }
+  ctx.effect(() => watchJapaneseLanguage(ctx), 'dsh-japanese: language')
   registerJapaneseDictionaries(ctx, dictionaries)
   ctx.effect(() => {
     const style = document.createElement('style')
     style.dataset.dshJapanese = ''
-    style.textContent = fontCss + japaneseTypography
+    const paint = () => {
+      // @font-face stays out of the document until Japanese is the active language,
+      // so the browser does not request the woff2 files for English or Chinese.
+      style.textContent = document.documentElement?.lang === 'ja' ? fontCss + japaneseTypography : ''
+    }
+    paint()
+    const unsubscribe = ctx.locale.subscribe(paint)
+    const observer = typeof MutationObserver === 'function'
+      ? new MutationObserver(paint)
+      : undefined
+    observer?.observe(document.documentElement, { attributes: true, attributeFilter: ['lang'] })
     document.head.append(style)
-    return () => style.remove()
+    return () => {
+      unsubscribe()
+      observer?.disconnect()
+      style.remove()
+    }
   }, 'dsh-japanese: bundled typography')
 }

@@ -2023,6 +2023,9 @@ var require_semver2 = __commonJS({
 });
 
 // src/index.mjs
+import { readFile as readFile2 } from "node:fs/promises";
+import { join as join2 } from "node:path";
+import { fileURLToPath } from "node:url";
 import { getDshRuntimeVersion } from "@deepseek-ai/dsh-app-boot";
 
 // src/updates.ts
@@ -2475,12 +2478,62 @@ var Updates = class {
 };
 
 // src/version.ts
-var VERSION = "0.2.2";
+var VERSION = "0.2.3";
+
+// src/fonts.mjs
+var FONT_ROUTE = "/dsh-japanese/fonts";
+var FONT_NAME = /^noto-sans-jp-[0-9]+-wght-normal\.woff2$/;
+function fontFileName(pathname) {
+  const prefix = `${FONT_ROUTE}/`;
+  if (!pathname.startsWith(prefix)) return void 0;
+  const name = pathname.slice(prefix.length);
+  return FONT_NAME.test(name) ? name : void 0;
+}
 
 // src/index.mjs
 function apply(ctx) {
   const updates = new Updates(() => ctx.get("pluginManager"), ctx.get("profileContext")?.dir, VERSION, getDshRuntimeVersion());
   ctx.effect(() => () => updates.dispose());
+  ctx.inject(["webServer"], (child) => {
+    const directory = fileURLToPath(new URL("./fonts/", import.meta.url));
+    child.effect(() => child.webServer.register({
+      kind: "prefix",
+      path: FONT_ROUTE,
+      async handler(request, response) {
+        if (request.method !== "GET" && request.method !== "HEAD") {
+          response.writeHead(405);
+          response.end();
+          return;
+        }
+        let pathname = "/";
+        try {
+          pathname = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
+        } catch {
+        }
+        const name = fontFileName(pathname);
+        if (name === void 0) {
+          response.writeHead(404);
+          response.end();
+          return;
+        }
+        try {
+          const body = await readFile2(join2(directory, name));
+          response.writeHead(200, {
+            "content-type": "font/woff2",
+            "content-length": String(body.length),
+            "cache-control": "public, max-age=31536000, immutable"
+          });
+          if (request.method === "HEAD") response.end();
+          else response.end(body);
+        } catch {
+          if (!response.headersSent) {
+            response.writeHead(404);
+            response.end();
+          }
+        }
+      }
+    }), "dsh-japanese: fonts");
+  });
   ctx.inject(["connection"], (child) => {
     for (const method of ["status", "check", "install"]) {
       const endpoint = `dsh-japanese-updates/update-${method}`;

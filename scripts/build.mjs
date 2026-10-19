@@ -1,6 +1,6 @@
 import { build } from 'esbuild'
-import { mkdir, readFile, writeFile, copyFile, readdir } from 'node:fs/promises'
-import { resolve, relative, sep } from 'node:path'
+import { mkdir, readFile, writeFile, copyFile, readdir, rm } from 'node:fs/promises'
+import { resolve, relative, sep, basename } from 'node:path'
 
 import { createHash } from 'node:crypto'
 import { ensureUpstream, upstreamRoot } from './upstream.mjs'
@@ -30,10 +30,15 @@ await writeFile('.cache/native-controls.css', cssEntries.map(([, css]) => css).j
 await mkdir('.cache', { recursive: true })
 await mkdir('dist', { recursive: true })
 const fontRoot = resolve('node_modules/@fontsource-variable/noto-sans-jp')
+const fontOut = resolve('dist/fonts')
+await rm(fontOut, { recursive: true, force: true })
+await mkdir(fontOut, { recursive: true })
 let fontCss = await readFile(resolve(fontRoot, 'wght.css'), 'utf8')
 for (const match of [...fontCss.matchAll(/url\(([^)]+)\)/g)]) {
-  const font = await readFile(resolve(fontRoot, match[1].replaceAll("'", '').replaceAll('"', '')))
-  fontCss = fontCss.replace(match[0], `url(data:font/woff2;base64,${font.toString('base64')})`)
+  const spec = match[1].replaceAll("'", '').replaceAll('"', '')
+  const name = basename(spec)
+  await copyFile(resolve(fontRoot, spec), resolve(fontOut, name))
+  fontCss = fontCss.replace(match[0], `url(/dsh-japanese/fonts/${name})`)
 }
 fontCss = fontCss.replaceAll('Noto Sans JP Variable', 'DSH Japanese UI')
 await writeFile('.cache/font-css.mjs', `export default ${JSON.stringify(fontCss)};\n`)

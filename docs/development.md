@@ -17,7 +17,7 @@ npm run test:browser
 npm run pack:plugin
 ```
 
-`npm test`は56名前空間・2555キーの翻訳、置換項目、フォント同梱とライセンスを確認します。`sync:contracts`は`upstream.json`に固定した公式ソースの翻訳キーを`tests/fixtures/upstream-dictionaries.json`に書き出します。現在の固定は DSH `0.2.1-alpha.3`（`2fbf4359b82fb94c03dcce0b831660d87f12ea5c`）です。
+`npm test`は58名前空間・2664キーの翻訳、各対応版の英語辞書との置換項目、フォントファイルとライセンスを確認します。`sync:contracts`は`upstream.json`に固定した公式ソースの翻訳キーを`tests/fixtures/upstream-dictionaries.json`に書き出します。固定コミットが変わると`.cache/upstream`を取り直します。現在の固定は DSH `0.2.1-rc.2`（`687f282e8625c6b8d11ff58211a90524be2e4317`）です。`tests/fixtures/en-by-version/`には `0.2.1-alpha.2` と `0.2.1-alpha.3` の英語辞書があり、日本語の置換項目をそれぞれの英語と照合します。
 
 `node scripts/check-dsh-compat.mjs`は peer の範囲が `0.2.1-alpha.2` から次の `0.2.x` プレリリースまでを含み、`0.3.0` のプレリリースを含まないことを確認します。比較は app-boot の `semver.satisfies(..., { includePrerelease: true })` と同じです。`--online` を付けると、GitHub の最新 DSH Release がその範囲外なら失敗します。範囲外の新しい版では起動時にこのプラグインが読み飛ばされます。
 
