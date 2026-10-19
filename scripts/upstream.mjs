@@ -1,4 +1,4 @@
-import { readFile, readdir, access, mkdir } from 'node:fs/promises'
+import { readFile, writeFile, readdir, access, mkdir, rm } from 'node:fs/promises'
 import { resolve, join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { build } from 'esbuild'
@@ -6,12 +6,20 @@ import { build } from 'esbuild'
 export const upstreamRoot = resolve('.cache/upstream')
 const pinned = JSON.parse(await readFile('upstream.json', 'utf8'))
 export async function ensureUpstream() {
-  try { await access(join(upstreamRoot, 'packages/client/locale/src/client/index.ts')); return } catch {}
+  const marker = join(upstreamRoot, '.pinned-commit')
+  const localeEntry = join(upstreamRoot, 'packages/client/locale/src/client/index.ts')
+  let pinnedHere = ''
+  try { pinnedHere = (await readFile(marker, 'utf8')).trim() } catch {}
+  if (pinnedHere === pinned.commit) {
+    try { await access(localeEntry); return } catch {}
+  }
+  await rm(upstreamRoot, { recursive: true, force: true })
   await mkdir('.cache', { recursive: true })
   for (const args of [['init',upstreamRoot],['-C',upstreamRoot,'fetch','--depth=1',pinned.repository,pinned.commit],['-C',upstreamRoot,'checkout','--detach','FETCH_HEAD']]) {
     const result = spawnSync('git', args, { stdio:'inherit' })
     if (result.status !== 0) throw new Error('Could not fetch the pinned official Harness source')
   }
+  await writeFile(marker, `${pinned.commit}\n`)
 }
 
 async function packageRoots(folder, result = new Map()) {

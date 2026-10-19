@@ -7,12 +7,12 @@ const require = createRequire(import.meta.url)
 test('Without slots/connection the built Client still owns only its dictionaries and font style', async () => {
   let factory
   const foreignStyle = { foreign: true }, styles = [foreignStyle], disposers = [], injections = [], registrations = []
-  const document = { createElement: () => ({ dataset: {}, textContent: '', remove() { styles.splice(styles.indexOf(this), 1) } }), head: { append: node => styles.push(node) } }
+  const document = { documentElement: { lang: 'ja' }, createElement: () => ({ dataset: {}, textContent: '', remove() { styles.splice(styles.indexOf(this), 1) } }), head: { append: node => styles.push(node) } }
   vm.runInNewContext(await readFile('dist/client.js', 'utf8'), { window: { __ModuleLoader__: { load: entry => { factory = entry.factory } } }, document })
   const plugin = factory(require)
   assert.deepEqual([...plugin.inject], ['locale'])
   let active = 'en'
-  const ctx = { inject: deps => injections.push([...deps]), effect: callback => disposers.push(callback()), locale: { getSnapshot: () => ({ active, locales: [{ id: 'en' }, { id: 'ja' }] }), addLanguage: () => { throw new Error('Existing Japanese language must not be replaced') }, register: (namespace, language) => { registrations.push({ namespace, language }); return () => {} } } }
+  const ctx = { inject: deps => injections.push([...deps]), effect: callback => disposers.push(callback()), locale: { getSnapshot: () => ({ active, locales: [{ id: 'en' }, { id: 'ja' }] }), subscribe: () => () => {}, addLanguage: () => { throw new Error('Existing Japanese language must not be replaced') }, register: (namespace, language) => { registrations.push({ namespace, language }); return () => {} } } }
   plugin.apply(ctx)
   assert.deepEqual(injections, [['slots', 'connection']])
   assert.ok(registrations.length >= 50)

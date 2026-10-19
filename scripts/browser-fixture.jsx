@@ -36,7 +36,7 @@ window.mountPlugin = async () => {
   const shared = { react: React, 'react-dom': ReactDom, 'react/jsx-runtime': ReactJsxRuntime }
   const plugin = factories.get('@local/dsh-japanese')(specifier => { if (specifier in shared) return shared[specifier]; throw new Error('Unexpected external') })
   const fiber = ctx.plugin(plugin); await fiber.await()
-  locale.setLocale('ja'); sync()
+  locale.setLocale(location.search.includes('lang=en') ? 'en' : 'ja'); sync()
   const unmount = ctx.uiRenderer.mount(document.getElementById('app'))
   window.testRuntime = { ctx, locale, installs: () => installs, setUpdate: async (status, reason = '') => { updateState = status; updateReason = reason; ctx.emit('connection/reset') }, unload: async () => { await fiber.dispose() }, dispose: async () => { unmount(); await root.dispose(); await ctx.fiber.dispose() } }
 }

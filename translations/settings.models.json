@@ -122,5 +122,15 @@
   "keyHide": "シークレットを隠す",
   "keyPlaceholderFallback": "空欄にすると環境変数で認証します（{hint}）",
   "keyPlaceholderSaved": "空欄にすると保存済みの認証情報を使います",
-  "keyReveal": "シークレットを表示"
+  "keyReveal": "シークレットを表示",
+  "modelReasoning": "推論レベル",
+  "modelReasoningLevel": "レベル",
+  "modelReasoningValue": "APIの値",
+  "modelReasoningHelp": "推論レベルについて",
+  "modelReasoningHelpText": "APIの値は、リクエストのreasoning-effort欄（OpenAIのreasoning_effortなど）に送られます。既定ではレベルの名前です。モデル提供者のAPI資料が別の値を指定している場合は、それに従ってください。オフは推論を止め、値は不要です。設定に既に書かれた値は残して送信します。",
+  "modelReasoningNeedsLevel": "オフ以外のレベルを1つ以上追加するか、推論レベルをオフにしてください。",
+  "modelReasoningValueRequired": "オフ以外の各レベルにはAPIの値が必要です。空の値は使えません。",
+  "modelReasoningAdd": "レベルを追加",
+  "modelReasoningRemove": "レベルを削除",
+  "modelReasoningOffValuePlaceholder": "推論をオフにします"
 }
