@@ -19,7 +19,7 @@ export interface Manager {
 export type UpdateStatus = 'idle' | 'available' | 'current' | 'unavailable' | 'incompatible' | 'checking' | 'installing' | 'unknown' | 'restart-required' | 'applied' | 'overridden' | 'failed' | 'cancelled'
 interface Candidate { id: string; version: string; tag: string; notes: string; url: string; runtime: string; filename: string; tarball: string; checksum: string }
 interface Operation { id: string; version: string; result?: ChangeResult }
-export interface UpdateView { status: UpdateStatus; running: string; profileKey: string | null; installed?: string; candidate?: Candidate; operation?: string; reason?: string; stage?: string; checkedAt?: string }
+export interface UpdateView { status: UpdateStatus; running: string; profileKey: string | null; installed?: string; candidate?: Candidate; operation?: string; reason?: string; stage?: string; requirements?: Record<string, string>; checkedAt?: string }
 
 // Explicit GitHub tags remain explicit. Release filenames classify the local
 // tarball route; only the new fixed-repository candidate is verified.
@@ -78,15 +78,44 @@ async function json(url: string, fetcher: typeof fetch): Promise<unknown> {
   } finally { await reader.cancel().catch(() => {}); reader.releaseLock() }
   return JSON.parse(Buffer.concat(chunks).toString('utf8'))
 }
-export async function getCandidate(runtime: string, fetcher: typeof fetch = fetch): Promise<Candidate> {
+export type DshRequirements = (manifest: Record<string, unknown>, runtime: string) => Record<string, string>
+const WORKSPACE_PEER = new Set(['workspace:^', 'workspace:~', 'workspace:*'])
+/** Same satisfies as DSH app-boot: a blank or unparsable range never matches, and prereleases participate. */
+function dshSatisfies(runtime: string, range: string): boolean {
+  return range.trim() !== '' && semver.satisfies(runtime, range, { includePrerelease: true })
+}
+/**
+ * Unmet dsh requirements under the official app-boot rule (plugin-compatibility.ts):
+ * an own engines.dsh range decides alone and peerDependencies are ignored;
+ * otherwise every @deepseek-ai/dsh or @deepseek-ai/dsh-* peer must match.
+ * For peers only, workspace:^, workspace:~, and workspace:* mean the running version;
+ * any other blank or invalid range, including a workspace: engines.dsh, is unmet.
+ * A manifest without any dsh requirement is compatible, exactly as app-boot loads it without a warning.
+ */
+export function unmetDshRequirements(manifest: Record<string, unknown>, runtime: string): Record<string, string> {
+  const engines = Object.hasOwn(manifest, 'engines') ? record(manifest.engines) : {}
+  if (Object.hasOwn(engines, 'dsh')) {
+    if (typeof engines.dsh !== 'string') throw new Error('metadata')
+    return dshSatisfies(runtime, engines.dsh) ? {} : { 'engines.dsh': engines.dsh }
+  }
+  if (!Object.hasOwn(manifest, 'peerDependencies')) return {}
+  const unmet: Record<string, string> = {}
+  for (const [name, range] of Object.entries(record(manifest.peerDependencies))) {
+    if (typeof range !== 'string') throw new Error('metadata')
+    if (name !== '@deepseek-ai/dsh' && !name.startsWith('@deepseek-ai/dsh-')) continue
+    if (!dshSatisfies(runtime, WORKSPACE_PEER.has(range) ? runtime : range)) unmet[name] = range
+  }
+  return unmet
+}
+export async function getCandidate(runtime: string, fetcher: typeof fetch = fetch, evaluate: DshRequirements = unmetDshRequirements): Promise<Candidate> {
   const release = record(await json(`https://api.github.com/repos/${REPOSITORY}/releases/latest`, fetcher))
   const tag = release.tag_name, version = typeof tag === 'string' && tag.startsWith('v') ? tag.slice(1) : ''
   if (!Number.isSafeInteger(release.id) || release.draft !== false || release.prerelease !== false || !semver.valid(version) || semver.prerelease(version) || release.html_url !== `${RELEASES}/tag/${tag}`) throw new Error('metadata')
   const manifest = record(await json(`https://raw.githubusercontent.com/${REPOSITORY}/${tag}/package.json`, fetcher))
   if (manifest.name !== PACKAGE || manifest.version !== version || record(record(manifest.dsh).bundle).patch !== './cordis.patch.yml') throw new Error('metadata')
-  const peers = record(manifest.peerDependencies)
-  const ranges = Object.entries(peers).filter(([name]) => name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-'))
-  if (!ranges.length || !semver.valid(runtime) || ranges.some(([, range]) => typeof range !== 'string' || !semver.validRange(range) || !semver.satisfies(runtime, range, { includePrerelease: true }))) throw new Error('incompatible')
+  if (!semver.valid(runtime)) throw new Error('incompatible')
+  const unmet = evaluate(manifest, runtime)
+  if (Object.keys(unmet).length > 0) throw Object.assign(new Error('incompatible'), { requirements: unmet })
   const filename = `local-dsh-japanese-${version}.tgz`
   if (!Array.isArray(release.assets)) throw new Error('asset')
   const assets = release.assets
@@ -112,10 +141,11 @@ export class Updates {
   private readonly runtime: string
   private readonly fetcher: typeof fetch
   private readonly schedule: (task: () => Promise<void>) => void
+  private readonly evaluate: DshRequirements
   private closed = false
   private readonly abort = new AbortController()
-  constructor(getManager: () => Manager | undefined, dir: string | undefined, running: string, runtime: string, fetcher: typeof fetch = fetch, schedule?: (task: () => Promise<void>) => void) {
-    this.getManager = getManager; this.dir = dir; this.running = running; this.runtime = runtime
+  constructor(getManager: () => Manager | undefined, dir: string | undefined, running: string, runtime: string, fetcher: typeof fetch = fetch, schedule?: (task: () => Promise<void>) => void, evaluate: DshRequirements = unmetDshRequirements) {
+    this.getManager = getManager; this.dir = dir; this.running = running; this.runtime = runtime; this.evaluate = evaluate
     // queueMicrotask, not the plugin fiber: removeBundle stops this plugin while
     // its caller is still suspended, and a disposer must not be that caller.
     this.schedule = schedule ?? (task => { queueMicrotask(() => { void task() }) })
@@ -146,10 +176,11 @@ export class Updates {
     }
     return bundle
   }
-  private fail(error: unknown, status: UpdateStatus = 'failed'): UpdateView {
+  private fail(error: unknown, status: UpdateStatus = 'failed', requirements?: Record<string, string>): UpdateView {
     const reason = error instanceof Error ? error.message : 'operation-error'
     const known = ['management-required', 'unaddressable', 'not-installed', 'source-unsupported', 'metadata', 'metadata-size', 'incompatible', 'asset', 'checksum', 'redirect', 'size', 'storage', 'cancelled', 'candidate-changed', 'settings-changed', 'already-installed', 'restore-failed', 'result-unknown', 'invalid-request', 'journal', 'release-unavailable', 'network']
-    this.view = { ...this.view, status, reason: known.includes(reason) ? reason : 'operation-error' }; return this.view
+    const { requirements: stale, ...previous } = this.view
+    this.view = { ...previous, status, reason: known.includes(reason) ? reason : 'operation-error', ...(requirements ? { requirements } : {}) }; return this.view
   }
   async status(expectedId?: unknown): Promise<UpdateView> {
     try {
@@ -180,7 +211,7 @@ export class Updates {
     }
     this.operation = operation
   }
-  private async failOrRestore(error: unknown, status: UpdateStatus): Promise<UpdateView> {
+  private async failOrRestore(error: unknown, status: UpdateStatus, requirements?: Record<string, string>): Promise<UpdateView> {
     if (error instanceof Error && (error.message === 'not-installed' || error.message === 'cancelled')) {
       try { await this.loadJournal() } catch { /* A missing journal still uses the original failure. */ }
       if (this.operation?.result && changeCode(this.operation.result) === 'restore-failed') {
@@ -189,7 +220,7 @@ export class Updates {
         return this.view
       }
     }
-    return this.fail(error, status)
+    return this.fail(error, status, requirements)
   }
   private result(result: ChangeResult, installed?: string): UpdateView {
     const operation = this.operation!
@@ -208,12 +239,12 @@ export class Updates {
     this.pending = (async () => {
       try {
         const bundle = await this.bundle(); this.candidate = undefined; this.view = { status: 'checking', running: this.running, profileKey: this.profileKey }
-        const candidate = await getCandidate(this.runtime, this.fetcher)
+        const candidate = await getCandidate(this.runtime, this.fetcher, this.evaluate)
         if (!semver.valid(this.running)) throw new Error('metadata')
         this.candidate = candidate
         this.view = { status: semver.gt(candidate.version, bundle.version ?? this.running) ? 'available' : 'current', running: this.running, profileKey: this.profileKey, candidate, checkedAt: new Date().toISOString() }
         return this.view
-      } catch (error) { return this.failOrRestore(error, error instanceof Error && error.message === 'incompatible' ? 'incompatible' : 'failed') }
+      } catch (error) { return this.failOrRestore(error, error instanceof Error && error.message === 'incompatible' ? 'incompatible' : 'failed', error instanceof Error && 'requirements' in error ? (error as { requirements: Record<string, string> }).requirements : undefined) }
     })().finally(() => { this.pending = undefined })
     return this.pending
   }
@@ -229,7 +260,7 @@ export class Updates {
         if (this.operation?.id === operationId) return this.status()
         if (this.operation && !this.operation.result) throw new Error('result-unknown')
         if (typeof operationId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(operationId)) throw new Error('invalid-request')
-        const before = await this.bundle(), candidate = await getCandidate(this.runtime, this.fetcher)
+        const before = await this.bundle(), candidate = await getCandidate(this.runtime, this.fetcher, this.evaluate)
         if (!this.candidate || candidate.id !== candidateId || candidate.id !== this.candidate.id || !semver.gt(candidate.version, before.version ?? this.running)) throw new Error('candidate-changed')
         this.operation = { id: operationId, version: candidate.version }; admitted = true; await this.save()
         this.view = { ...this.view, status: 'installing', operation: operationId }
@@ -242,8 +273,8 @@ export class Updates {
           if (createHash('sha256').update(bytes).digest('hex') !== match[1]!.toLowerCase()) throw new Error('checksum')
           const manifest = packageManifest(bytes)
           if (manifest.name !== PACKAGE || manifest.version !== candidate.version || record(record(manifest.dsh).bundle).patch !== './cordis.patch.yml') throw new Error('metadata')
-          const peers = Object.entries(record(manifest.peerDependencies)).filter(([name]) => name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-'))
-          if (!peers.length || peers.some(([, range]) => typeof range !== 'string' || !semver.validRange(range) || !semver.satisfies(this.runtime, range, { includePrerelease: true }))) throw new Error('incompatible')
+          const unmet = this.evaluate(manifest, this.runtime)
+          if (Object.keys(unmet).length > 0) throw Object.assign(new Error('incompatible'), { requirements: unmet })
           const directory = await mkdtemp(join(this.dir!, '.dsh-japanese-update', 'verified-'))
           spec = join(directory, candidate.filename)
           await writeFile(spec, bytes, { flag: 'wx', mode: 0o600 })

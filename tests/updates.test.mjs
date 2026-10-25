@@ -35,7 +35,7 @@ async function fixture(t, options = {}) {
   }
   const calls = []
   const manager = { listBundles: async () => [bundle], waitForInstall: async () => null, installBundle: async (spec, config) => { calls.push({ spec, config }); bundle.version = version; if (!spec.startsWith('github:')) bundle.source = `file:${spec}`; return { changed: true, application: 'restart-required', stage: 'install', target: spec, version, bundle: PACKAGE, ...options.result } }, ...options.manager }
-  const updates = new Updates(() => manager, dir, '0.2.0', runtime, options.fetcher ?? fetcher(), options.schedule)
+  const updates = new Updates(() => manager, dir, '0.2.0', runtime, options.fetcher ?? fetcher(), options.schedule, options.evaluate)
   return { dir, bundle, calls, manager, updates }
 }
 test('Strict official metadata, channel, SemVer and compatibility', async () => {
@@ -45,6 +45,47 @@ test('Strict official metadata, channel, SemVer and compatibility', async () => 
   await assert.rejects(getCandidate('0.2.2', fetcher()), /incompatible/)
   assert.equal(supportsSource(`github:${REPOSITORY}#v0.2.0`), true)
   assert.equal(supportsSource('github:other/plugin'), false)
+})
+test('engines.dsh decides alone and dsh peers apply only when it is absent, like app-boot', async () => {
+  // The issue fixture: peers accept the runtime while an own engines.dsh range rejects it.
+  await assert.rejects(getCandidate(runtime, fetcher(release(), { ...manifest(), engines: { dsh: '>=0.2.2 <0.3.0-0' }, peerDependencies: { '@deepseek-ai/dsh': '>=0.2.1-alpha.2 <0.3.0-0' } })), /incompatible/)
+  // The reverse: engines accepts the runtime while a peer demands newer, and peers stay ignored.
+  assert.equal((await getCandidate(runtime, fetcher(release(), { ...manifest(), engines: { dsh: '>=0.2.1-alpha.2 <0.3.0-0' }, peerDependencies: { '@deepseek-ai/dsh': '>=0.2.2 <0.3.0-0' } }))).version, version)
+  // An engines-only declaration decides both ways instead of staying peer-unknown.
+  assert.equal((await getCandidate(runtime, fetcher(release(), { ...manifest(), peerDependencies: {}, engines: { dsh: '>=0.2.1-alpha.2 <0.3.0-0' } }))).version, version)
+  await assert.rejects(getCandidate(runtime, fetcher(release(), { ...manifest(), peerDependencies: {}, engines: { dsh: '>=0.2.2 <0.3.0-0' } })), /incompatible/)
+  // A manifest without any dsh requirement is loadable, exactly as app-boot loads it without a warning.
+  assert.equal((await getCandidate(runtime, fetcher(release(), { ...manifest(), peerDependencies: { react: '^18' } }))).version, version)
+  // Only engines.dsh takes priority; an engines.node key never does.
+  assert.equal((await getCandidate(runtime, fetcher(release(), { ...manifest(), engines: { node: '>=22' }, peerDependencies: { '@deepseek-ai/dsh-web': runtime } }))).version, version)
+  // Prereleases participate in engines.dsh exactly as they do in peers.
+  assert.equal((await getCandidate('0.2.2-rc.1', fetcher(release(), { ...manifest(), peerDependencies: {}, engines: { dsh: '>=0.2.1-alpha.2 <0.3.0-0' } }))).version, version)
+  // Blank, invalid, and workspace engines.dsh ranges are unmet; workspace: stays a peer-only rule.
+  for (const range of ['', '   ', 'not-a-range', 'workspace:^']) await assert.rejects(getCandidate(runtime, fetcher(release(), { ...manifest(), peerDependencies: {}, engines: { dsh: range } })), /incompatible/)
+  // Malformed engines or peer fields state no readable rule.
+  for (const engines of [{ dsh: 2 }, null, 'x', []]) await assert.rejects(getCandidate(runtime, fetcher(release(), { ...manifest(), engines })), /metadata/)
+  await assert.rejects(getCandidate(runtime, fetcher(release(), { ...manifest(), peerDependencies: { '@deepseek-ai/dsh': 1 } })), /metadata/)
+  await assert.rejects(getCandidate(runtime, fetcher(release(), { ...manifest(), peerDependencies: null })), /metadata/)
+})
+test('an unmet engines.dsh release surfaces the needed range before any install', async t => {
+  const engines = { ...manifest(), engines: { dsh: '>=0.2.2 <0.3.0-0' }, peerDependencies: { '@deepseek-ai/dsh': '>=0.2.1-alpha.2 <0.3.0-0' } }
+  const { updates, calls } = await fixture(t, { fetcher: fetcher(release(), engines) })
+  const checked = await updates.check()
+  assert.equal(checked.status, 'incompatible')
+  assert.equal(checked.reason, 'incompatible')
+  assert.deepEqual(checked.requirements, { 'engines.dsh': '>=0.2.2 <0.3.0-0' })
+  assert.equal(calls.length, 0)
+})
+test('the host-substituted evaluator decides instead of the local rule', async t => {
+  const asked = []
+  const accepted = await fixture(t, { evaluate: (manifestValue, runtimeValue) => { asked.push([runtimeValue, manifestValue.name]); return {} } })
+  assert.equal((await accepted.updates.check()).status, 'available')
+  assert.deepEqual(asked, [[runtime, PACKAGE]])
+  const rejected = await fixture(t, { evaluate: () => ({ 'engines.dsh': '>=0.2.2 <0.3.0-0' }) })
+  const checked = await rejected.updates.check()
+  assert.equal(checked.status, 'incompatible')
+  assert.deepEqual(checked.requirements, { 'engines.dsh': '>=0.2.2 <0.3.0-0' })
+  assert.equal(rejected.calls.length, 0)
 })
 test('Disabled bundle stays disabled; pin remains explicit; restart is not success; journal survives reload', async t => {
   const { updates, manager, dir, calls } = await fixture(t)
@@ -161,8 +202,8 @@ test('A busy install rejects another operation ID and a check cannot masquerade 
   await assert.rejects(updates.install(checked.candidate.id, randomUUID(), updates.profileKey), /busy/)
   settle({ changed: false, application: 'failed', stage: 'install', target: PACKAGE }); await first
 })
-test('Matching checksums never admit an archive with the wrong package, version or DSH peers', async t => {
-  for (const value of [{ ...manifest(), name: 'wrong-package' }, { ...manifest(), version: '0.2.0' }, { ...manifest(), peerDependencies: { '@deepseek-ai/dsh-web': '99.0.0' } }]) {
+test('Matching checksums never admit an archive with the wrong package, version or dsh requirements', async t => {
+  for (const value of [{ ...manifest(), name: 'wrong-package' }, { ...manifest(), version: '0.2.0' }, { ...manifest(), peerDependencies: { '@deepseek-ai/dsh-web': '99.0.0' } }, { ...manifest(), engines: { dsh: '>=0.2.2 <0.3.0-0' } }]) {
     const wrong = archive(value), normal = fetcher()
     const { updates, calls } = await fixture(t, { bundle: { source: 'file:/downloads/local-dsh-japanese-0.2.0.tgz' }, fetcher: async url => String(url).endsWith('SHA256SUMS') ? new Response(`${createHash('sha256').update(wrong).digest('hex')}  ${filename}\n`) : String(url).endsWith(filename) ? new Response(wrong) : normal(url) })
     const checked = await updates.check()

@@ -1,13 +1,25 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { getDshRuntimeVersion } from '@deepseek-ai/dsh-app-boot'
+import { evaluatePluginCompatibility, getDshRuntimeVersion } from '@deepseek-ai/dsh-app-boot'
 import { Updates } from './updates.ts'
 import { VERSION } from './version.ts'
 import { FONT_ROUTE, fontFileName } from './fonts.mjs'
 
+// Map a published app-boot compatibility result to unmet requirements.
+// app-boot 0.2.1-alpha.2 named them `peers`; rc.2 renamed them to `requirements`.
+function publishedDshRequirements(issue) {
+  if (!issue || issue.exempted === true) return {}
+  return issue.requirements ?? issue.peers ?? {}
+}
 export function apply(ctx) {
-  const updates = new Updates(() => ctx.get('pluginManager'), ctx.get('profileContext')?.dir, VERSION, getDshRuntimeVersion())
+  // Delegate the boot-time compatibility decision to the host's published evaluator; updates.ts keeps the same rule as the fallback.
+  const updates = new Updates(() => ctx.get('pluginManager'), ctx.get('profileContext')?.dir, VERSION, getDshRuntimeVersion(), fetch, undefined, (manifest, runtime) => {
+    try {
+      // Host-granted exemptions are not published here, so an exempted mismatch stays manual.
+      return publishedDshRequirements(evaluatePluginCompatibility(manifest, {}, runtime))
+    } catch { throw new Error('metadata') }
+  })
   ctx.effect(() => () => updates.dispose())
   // Connection authenticates these routes just like the standard management UI.
   // Missing services only remove updating; Client dictionaries remain independent.

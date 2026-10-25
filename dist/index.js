@@ -2026,7 +2026,7 @@ var require_semver2 = __commonJS({
 import { readFile as readFile2 } from "node:fs/promises";
 import { join as join2 } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getDshRuntimeVersion } from "@deepseek-ai/dsh-app-boot";
+import { evaluatePluginCompatibility, getDshRuntimeVersion } from "@deepseek-ai/dsh-app-boot";
 
 // src/updates.ts
 import { randomUUID, createHash } from "node:crypto";
@@ -2158,15 +2158,34 @@ async function json(url, fetcher) {
   }
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
-async function getCandidate(runtime, fetcher = fetch) {
+var WORKSPACE_PEER = /* @__PURE__ */ new Set(["workspace:^", "workspace:~", "workspace:*"]);
+function dshSatisfies(runtime, range) {
+  return range.trim() !== "" && import_semver.default.satisfies(runtime, range, { includePrerelease: true });
+}
+function unmetDshRequirements(manifest, runtime) {
+  const engines = Object.hasOwn(manifest, "engines") ? record(manifest.engines) : {};
+  if (Object.hasOwn(engines, "dsh")) {
+    if (typeof engines.dsh !== "string") throw new Error("metadata");
+    return dshSatisfies(runtime, engines.dsh) ? {} : { "engines.dsh": engines.dsh };
+  }
+  if (!Object.hasOwn(manifest, "peerDependencies")) return {};
+  const unmet = {};
+  for (const [name, range] of Object.entries(record(manifest.peerDependencies))) {
+    if (typeof range !== "string") throw new Error("metadata");
+    if (name !== "@deepseek-ai/dsh" && !name.startsWith("@deepseek-ai/dsh-")) continue;
+    if (!dshSatisfies(runtime, WORKSPACE_PEER.has(range) ? runtime : range)) unmet[name] = range;
+  }
+  return unmet;
+}
+async function getCandidate(runtime, fetcher = fetch, evaluate = unmetDshRequirements) {
   const release = record(await json(`https://api.github.com/repos/${REPOSITORY}/releases/latest`, fetcher));
   const tag = release.tag_name, version = typeof tag === "string" && tag.startsWith("v") ? tag.slice(1) : "";
   if (!Number.isSafeInteger(release.id) || release.draft !== false || release.prerelease !== false || !import_semver.default.valid(version) || import_semver.default.prerelease(version) || release.html_url !== `${RELEASES}/tag/${tag}`) throw new Error("metadata");
   const manifest = record(await json(`https://raw.githubusercontent.com/${REPOSITORY}/${tag}/package.json`, fetcher));
   if (manifest.name !== PACKAGE || manifest.version !== version || record(record(manifest.dsh).bundle).patch !== "./cordis.patch.yml") throw new Error("metadata");
-  const peers = record(manifest.peerDependencies);
-  const ranges = Object.entries(peers).filter(([name]) => name === "@deepseek-ai/dsh" || name.startsWith("@deepseek-ai/dsh-"));
-  if (!ranges.length || !import_semver.default.valid(runtime) || ranges.some(([, range]) => typeof range !== "string" || !import_semver.default.validRange(range) || !import_semver.default.satisfies(runtime, range, { includePrerelease: true }))) throw new Error("incompatible");
+  if (!import_semver.default.valid(runtime)) throw new Error("incompatible");
+  const unmet = evaluate(manifest, runtime);
+  if (Object.keys(unmet).length > 0) throw Object.assign(new Error("incompatible"), { requirements: unmet });
   const filename = `local-dsh-japanese-${version}.tgz`;
   if (!Array.isArray(release.assets)) throw new Error("asset");
   const assets = release.assets;
@@ -2192,13 +2211,15 @@ var Updates = class {
   runtime;
   fetcher;
   schedule;
+  evaluate;
   closed = false;
   abort = new AbortController();
-  constructor(getManager, dir, running, runtime, fetcher = fetch, schedule) {
+  constructor(getManager, dir, running, runtime, fetcher = fetch, schedule, evaluate = unmetDshRequirements) {
     this.getManager = getManager;
     this.dir = dir;
     this.running = running;
     this.runtime = runtime;
+    this.evaluate = evaluate;
     this.schedule = schedule ?? ((task) => {
       queueMicrotask(() => {
         void task();
@@ -2239,10 +2260,11 @@ var Updates = class {
     }
     return bundle;
   }
-  fail(error, status = "failed") {
+  fail(error, status = "failed", requirements) {
     const reason = error instanceof Error ? error.message : "operation-error";
     const known = ["management-required", "unaddressable", "not-installed", "source-unsupported", "metadata", "metadata-size", "incompatible", "asset", "checksum", "redirect", "size", "storage", "cancelled", "candidate-changed", "settings-changed", "already-installed", "restore-failed", "result-unknown", "invalid-request", "journal", "release-unavailable", "network"];
-    this.view = { ...this.view, status, reason: known.includes(reason) ? reason : "operation-error" };
+    const { requirements: stale, ...previous } = this.view;
+    this.view = { ...previous, status, reason: known.includes(reason) ? reason : "operation-error", ...requirements ? { requirements } : {} };
     return this.view;
   }
   async status(expectedId) {
@@ -2285,7 +2307,7 @@ var Updates = class {
     }
     this.operation = operation;
   }
-  async failOrRestore(error, status) {
+  async failOrRestore(error, status, requirements) {
     if (error instanceof Error && (error.message === "not-installed" || error.message === "cancelled")) {
       try {
         await this.loadJournal();
@@ -2297,7 +2319,7 @@ var Updates = class {
         return this.view;
       }
     }
-    return this.fail(error, status);
+    return this.fail(error, status, requirements);
   }
   result(result, installed) {
     const operation = this.operation;
@@ -2319,13 +2341,13 @@ var Updates = class {
         const bundle = await this.bundle();
         this.candidate = void 0;
         this.view = { status: "checking", running: this.running, profileKey: this.profileKey };
-        const candidate = await getCandidate(this.runtime, this.fetcher);
+        const candidate = await getCandidate(this.runtime, this.fetcher, this.evaluate);
         if (!import_semver.default.valid(this.running)) throw new Error("metadata");
         this.candidate = candidate;
         this.view = { status: import_semver.default.gt(candidate.version, bundle.version ?? this.running) ? "available" : "current", running: this.running, profileKey: this.profileKey, candidate, checkedAt: (/* @__PURE__ */ new Date()).toISOString() };
         return this.view;
       } catch (error) {
-        return this.failOrRestore(error, error instanceof Error && error.message === "incompatible" ? "incompatible" : "failed");
+        return this.failOrRestore(error, error instanceof Error && error.message === "incompatible" ? "incompatible" : "failed", error instanceof Error && "requirements" in error ? error.requirements : void 0);
       }
     })().finally(() => {
       this.pending = void 0;
@@ -2343,7 +2365,7 @@ var Updates = class {
         if (this.operation?.id === operationId) return this.status();
         if (this.operation && !this.operation.result) throw new Error("result-unknown");
         if (typeof operationId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(operationId)) throw new Error("invalid-request");
-        const before = await this.bundle(), candidate = await getCandidate(this.runtime, this.fetcher);
+        const before = await this.bundle(), candidate = await getCandidate(this.runtime, this.fetcher, this.evaluate);
         if (!this.candidate || candidate.id !== candidateId || candidate.id !== this.candidate.id || !import_semver.default.gt(candidate.version, before.version ?? this.running)) throw new Error("candidate-changed");
         this.operation = { id: operationId, version: candidate.version };
         admitted = true;
@@ -2358,8 +2380,8 @@ var Updates = class {
           if (createHash("sha256").update(bytes).digest("hex") !== match[1].toLowerCase()) throw new Error("checksum");
           const manifest = packageManifest(bytes);
           if (manifest.name !== PACKAGE || manifest.version !== candidate.version || record(record(manifest.dsh).bundle).patch !== "./cordis.patch.yml") throw new Error("metadata");
-          const peers = Object.entries(record(manifest.peerDependencies)).filter(([name]) => name === "@deepseek-ai/dsh" || name.startsWith("@deepseek-ai/dsh-"));
-          if (!peers.length || peers.some(([, range]) => typeof range !== "string" || !import_semver.default.validRange(range) || !import_semver.default.satisfies(this.runtime, range, { includePrerelease: true }))) throw new Error("incompatible");
+          const unmet = this.evaluate(manifest, this.runtime);
+          if (Object.keys(unmet).length > 0) throw Object.assign(new Error("incompatible"), { requirements: unmet });
           const directory = await mkdtemp(join(this.dir, ".dsh-japanese-update", "verified-"));
           spec = join(directory, candidate.filename);
           await writeFile(spec, bytes, { flag: "wx", mode: 384 });
@@ -2619,8 +2641,18 @@ function fontFileName(pathname) {
 }
 
 // src/index.mjs
+function publishedDshRequirements(issue) {
+  if (!issue || issue.exempted === true) return {};
+  return issue.requirements ?? issue.peers ?? {};
+}
 function apply(ctx) {
-  const updates = new Updates(() => ctx.get("pluginManager"), ctx.get("profileContext")?.dir, VERSION, getDshRuntimeVersion());
+  const updates = new Updates(() => ctx.get("pluginManager"), ctx.get("profileContext")?.dir, VERSION, getDshRuntimeVersion(), fetch, void 0, (manifest, runtime) => {
+    try {
+      return publishedDshRequirements(evaluatePluginCompatibility(manifest, {}, runtime));
+    } catch {
+      throw new Error("metadata");
+    }
+  });
   ctx.effect(() => () => updates.dispose());
   ctx.inject(["webServer"], (child) => {
     const directory = fileURLToPath(new URL("./fonts/", import.meta.url));
