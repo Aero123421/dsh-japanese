@@ -12,10 +12,31 @@ window.mountPlugin = async () => {
   const ctx = new Context()
   const locale = new LocaleRuntime(ctx)
   ctx.provide('locale', locale)
-  let installs = 0, updateState = 'unavailable', updateReason = ''
+  let installs = 0, updateState = 'unavailable', updateReason = '', updateRequirements, updateNotes = '更新の説明'
+  let hostOperation, nextInstallReply, nextCheckReply
+  const requests = []
   if (!location.search.includes('no-connection')) ctx.provide('connection', { rpc: { call: async (_base, method, payload) => {
-    if (method.endsWith('update-install')) { installs++; updateState = 'restart-required'; updateReason = '' }
-    return { ok: true, value: { status: updateState, running: VERSION, profileKey: 'a'.repeat(64), ...(updateReason ? { reason: updateReason, stage: 'install' } : {}), ...(updateState === 'available' ? { candidate: { id: 'fixture', version: '0.3.0', notes: '更新の説明', url: 'https://github.com/Aero123421/dsh-japanese/releases/tag/v0.3.0', runtime: '0.2.1-alpha.2' } } : {}), ...(payload.operationId ? { operation: payload.operationId } : {}) } }
+    const request = { method, operationId: payload.operationId, settled: false }
+    requests.push(request)
+    if (method.endsWith('update-install')) {
+      installs++
+      if (nextInstallReply) {
+        ({ status: updateState, reason: updateReason = '', requirements: updateRequirements } = nextInstallReply)
+        nextInstallReply = undefined
+      } else {
+        updateState = 'restart-required'; updateReason = ''; hostOperation = payload.operationId
+      }
+    }
+    if (method.endsWith('update-check') && nextCheckReply) {
+      ({ status: updateState, reason: updateReason = '', requirements: updateRequirements, notes: updateNotes = '更新の説明' } = nextCheckReply)
+      nextCheckReply = undefined
+    }
+    if (method.endsWith('update-status') && payload.operationId && payload.operationId !== hostOperation) {
+      request.settled = true
+      return { ok: true, value: { status: 'unknown', running: VERSION, profileKey: 'a'.repeat(64), operation: payload.operationId } }
+    }
+    request.settled = true
+    return { ok: true, value: { status: updateState, running: VERSION, profileKey: 'a'.repeat(64), ...(updateReason ? { reason: updateReason, stage: 'install' } : {}), ...(updateRequirements ? { requirements: updateRequirements } : {}), ...(updateState === 'available' ? { candidate: { id: 'fixture', version: '0.3.0', notes: updateNotes, url: 'https://github.com/Aero123421/dsh-japanese/releases/tag/v0.3.0', runtime: '0.2.1-alpha.2' } } : {}), ...(hostOperation ? { operation: hostOperation } : {}) } }
   } } })
   const root = ctx.plugin(renderer); await root.await()
   const absent = Object.freeze({ key: undefined, hooks: {}, keyedHooks: {}, props: {} })
@@ -38,5 +59,16 @@ window.mountPlugin = async () => {
   const fiber = ctx.plugin(plugin); await fiber.await()
   locale.setLocale(location.search.includes('lang=en') ? 'en' : 'ja'); sync()
   const unmount = ctx.uiRenderer.mount(document.getElementById('app'))
-  window.testRuntime = { ctx, locale, installs: () => installs, setUpdate: async (status, reason = '') => { updateState = status; updateReason = reason; ctx.emit('connection/reset') }, unload: async () => { await fiber.dispose() }, dispose: async () => { unmount(); await root.dispose(); await ctx.fiber.dispose() } }
+  window.testRuntime = {
+    ctx,
+    locale,
+    installs: () => installs,
+    requests: () => requests,
+    setUpdate: async (status, reason = '', requirements, notes = '更新の説明') => { updateState = status; updateReason = reason; updateRequirements = requirements; updateNotes = notes; ctx.emit('connection/reset') },
+    setNextInstallReply: (status, reason, requirements) => { nextInstallReply = { status, reason, requirements } },
+    setNextCheckReply: (status, reason = '', requirements, notes = '更新の説明') => { nextCheckReply = { status, reason, requirements, notes } },
+    reconnect: () => ctx.emit('connection/reset'),
+    unload: async () => { await fiber.dispose() },
+    dispose: async () => { unmount(); await root.dispose(); await ctx.fiber.dispose() },
+  }
 }

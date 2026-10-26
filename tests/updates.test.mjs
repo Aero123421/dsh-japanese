@@ -35,7 +35,7 @@ async function fixture(t, options = {}) {
   }
   const calls = []
   const manager = { listBundles: async () => [bundle], waitForInstall: async () => null, installBundle: async (spec, config) => { calls.push({ spec, config }); bundle.version = version; if (!spec.startsWith('github:')) bundle.source = `file:${spec}`; return { changed: true, application: 'restart-required', stage: 'install', target: spec, version, bundle: PACKAGE, ...options.result } }, ...options.manager }
-  const updates = new Updates(() => manager, dir, '0.2.0', runtime, options.fetcher ?? fetcher(), options.schedule)
+  const updates = new Updates(() => manager, dir, '0.2.0', runtime, options.fetcher ?? fetcher(), options.schedule, options.evaluate)
   return { dir, bundle, calls, manager, updates }
 }
 test('Strict official metadata, channel, SemVer and compatibility', async () => {
@@ -45,6 +45,60 @@ test('Strict official metadata, channel, SemVer and compatibility', async () => 
   await assert.rejects(getCandidate('0.2.2', fetcher()), /incompatible/)
   assert.equal(supportsSource(`github:${REPOSITORY}#v0.2.0`), true)
   assert.equal(supportsSource('github:other/plugin'), false)
+})
+test('engines.dsh decides alone and dsh peers apply only when it is absent, like app-boot', async () => {
+  // The issue fixture: peers accept the runtime while an own engines.dsh range rejects it.
+  await assert.rejects(getCandidate(runtime, fetcher(release(), { ...manifest(), engines: { dsh: '>=0.2.2 <0.3.0-0' }, peerDependencies: { '@deepseek-ai/dsh': '>=0.2.1-alpha.2 <0.3.0-0' } })), /incompatible/)
+  // The reverse: engines accepts the runtime while a peer demands newer, and peers stay ignored.
+  assert.equal((await getCandidate(runtime, fetcher(release(), { ...manifest(), engines: { dsh: '>=0.2.1-alpha.2 <0.3.0-0' }, peerDependencies: { '@deepseek-ai/dsh': '>=0.2.2 <0.3.0-0' } }))).version, version)
+  // An engines-only declaration decides both ways instead of staying peer-unknown.
+  assert.equal((await getCandidate(runtime, fetcher(release(), { ...manifest(), peerDependencies: {}, engines: { dsh: '>=0.2.1-alpha.2 <0.3.0-0' } }))).version, version)
+  await assert.rejects(getCandidate(runtime, fetcher(release(), { ...manifest(), peerDependencies: {}, engines: { dsh: '>=0.2.2 <0.3.0-0' } })), /incompatible/)
+  // A manifest without any dsh requirement is loadable, exactly as app-boot loads it without a warning.
+  assert.equal((await getCandidate(runtime, fetcher(release(), { ...manifest(), peerDependencies: { react: '^18' } }))).version, version)
+  // Only engines.dsh takes priority; an engines.node key never does.
+  assert.equal((await getCandidate(runtime, fetcher(release(), { ...manifest(), engines: { node: '>=22' }, peerDependencies: { '@deepseek-ai/dsh-web': runtime } }))).version, version)
+  // Prereleases participate in engines.dsh exactly as they do in peers.
+  assert.equal((await getCandidate('0.2.2-rc.1', fetcher(release(), { ...manifest(), peerDependencies: {}, engines: { dsh: '>=0.2.1-alpha.2 <0.3.0-0' } }))).version, version)
+  // Blank, invalid, and workspace engines.dsh ranges are unmet; workspace: stays a peer-only rule.
+  for (const range of ['', '   ', 'not-a-range', 'workspace:^']) await assert.rejects(getCandidate(runtime, fetcher(release(), { ...manifest(), peerDependencies: {}, engines: { dsh: range } })), /incompatible/)
+  // Malformed engines or peer fields state no readable rule.
+  for (const engines of [{ dsh: 2 }, null, 'x', []]) await assert.rejects(getCandidate(runtime, fetcher(release(), { ...manifest(), engines })), /metadata/)
+  await assert.rejects(getCandidate(runtime, fetcher(release(), { ...manifest(), peerDependencies: { '@deepseek-ai/dsh': 1 } })), /metadata/)
+  await assert.rejects(getCandidate(runtime, fetcher(release(), { ...manifest(), peerDependencies: null })), /metadata/)
+})
+test('an unmet engines.dsh release surfaces the needed range before any install', async t => {
+  const engines = { ...manifest(), engines: { dsh: '>=0.2.2 <0.3.0-0' }, peerDependencies: { '@deepseek-ai/dsh': '>=0.2.1-alpha.2 <0.3.0-0' } }
+  const { updates, calls } = await fixture(t, { fetcher: fetcher(release(), engines) })
+  const checked = await updates.check()
+  assert.equal(checked.status, 'incompatible')
+  assert.equal(checked.reason, 'incompatible')
+  assert.deepEqual(checked.requirements, { 'engines.dsh': '>=0.2.2 <0.3.0-0' })
+  assert.equal(calls.length, 0)
+})
+test('the host-substituted evaluator decides instead of the local rule', async t => {
+  const asked = []
+  const accepted = await fixture(t, { evaluate: (manifestValue, runtimeValue) => { asked.push([runtimeValue, manifestValue.name]); return {} } })
+  assert.equal((await accepted.updates.check()).status, 'available')
+  assert.deepEqual(asked, [[runtime, PACKAGE]])
+  const rejected = await fixture(t, { evaluate: () => ({ 'engines.dsh': '>=0.2.2 <0.3.0-0' }) })
+  const checked = await rejected.updates.check()
+  assert.equal(checked.status, 'incompatible')
+  assert.deepEqual(checked.requirements, { 'engines.dsh': '>=0.2.2 <0.3.0-0' })
+  assert.equal(rejected.calls.length, 0)
+})
+test('an update that becomes incompatible during install revalidation shows the unmet requirement', async t => {
+  let evaluations = 0
+  const { updates, calls } = await fixture(t, {
+    evaluate: () => ++evaluations === 1 ? {} : { 'engines.dsh': '>=0.2.2 <0.3.0-0' },
+  })
+  const checked = await updates.check()
+  assert.equal(checked.status, 'available')
+  const result = await updates.install(checked.candidate.id, randomUUID(), updates.profileKey)
+  assert.equal(result.status, 'incompatible')
+  assert.equal(result.reason, 'incompatible')
+  assert.deepEqual(result.requirements, { 'engines.dsh': '>=0.2.2 <0.3.0-0' })
+  assert.equal(calls.length, 0)
 })
 test('Disabled bundle stays disabled; pin remains explicit; restart is not success; journal survives reload', async t => {
   const { updates, manager, dir, calls } = await fixture(t)
@@ -161,14 +215,51 @@ test('A busy install rejects another operation ID and a check cannot masquerade 
   await assert.rejects(updates.install(checked.candidate.id, randomUUID(), updates.profileKey), /busy/)
   settle({ changed: false, application: 'failed', stage: 'install', target: PACKAGE }); await first
 })
-test('Matching checksums never admit an archive with the wrong package, version or DSH peers', async t => {
-  for (const value of [{ ...manifest(), name: 'wrong-package' }, { ...manifest(), version: '0.2.0' }, { ...manifest(), peerDependencies: { '@deepseek-ai/dsh-web': '99.0.0' } }]) {
+test('Matching checksums never admit an archive with the wrong package, version or dsh requirements', async t => {
+  const invalid = [
+    { value: { ...manifest(), name: 'wrong-package' }, status: 'failed' },
+    { value: { ...manifest(), version: '0.2.0' }, status: 'failed' },
+    { value: { ...manifest(), peerDependencies: { '@deepseek-ai/dsh-web': '99.0.0' } }, status: 'incompatible', requirements: { '@deepseek-ai/dsh-web': '99.0.0' } },
+    { value: { ...manifest(), engines: { dsh: '>=0.2.2 <0.3.0-0' } }, status: 'incompatible', requirements: { 'engines.dsh': '>=0.2.2 <0.3.0-0' } },
+  ]
+  for (const { value, status, requirements } of invalid) {
     const wrong = archive(value), normal = fetcher()
     const { updates, calls } = await fixture(t, { bundle: { source: 'file:/downloads/local-dsh-japanese-0.2.0.tgz' }, fetcher: async url => String(url).endsWith('SHA256SUMS') ? new Response(`${createHash('sha256').update(wrong).digest('hex')}  ${filename}\n`) : String(url).endsWith(filename) ? new Response(wrong) : normal(url) })
     const checked = await updates.check()
-    assert.equal((await updates.install(checked.candidate.id, randomUUID(), updates.profileKey)).status, 'failed')
+    const result = await updates.install(checked.candidate.id, randomUUID(), updates.profileKey)
+    assert.equal(result.status, status)
+    if (requirements) assert.deepEqual(result.requirements, requirements)
     assert.equal(calls.length, 0)
   }
+})
+test('A tarball compatibility refusal survives a lost reply, reconnect and fresh journal load', async t => {
+  const unmet = { 'engines.dsh': '>=0.2.2 <0.3.0-0' }
+  const wrong = archive({ ...manifest(), engines: { dsh: unmet['engines.dsh'] } }), normal = fetcher()
+  const fetchArchive = async url => String(url).endsWith('SHA256SUMS')
+    ? new Response(`${createHash('sha256').update(wrong).digest('hex')}  ${filename}\n`)
+    : String(url).endsWith(filename) ? new Response(wrong) : normal(url)
+  const { updates, manager, dir, calls } = await fixture(t, { bundle: { source: 'file:/downloads/local-dsh-japanese-0.2.0.tgz' }, fetcher: fetchArchive })
+  const checked = await updates.check(), id = randomUUID()
+  assert.equal(checked.status, 'available', 'the raw release manifest remains compatible')
+
+  // The install reply can be lost after the host has persisted its refusal.
+  const reply = await updates.install(checked.candidate.id, id, updates.profileKey)
+  assert.equal(reply.status, 'incompatible')
+  assert.deepEqual(reply.requirements, unmet)
+  assert.equal(calls.length, 0)
+
+  const reconnect = new Updates(() => manager, dir, '0.2.0', runtime, fetchArchive)
+  for (const restored of [await updates.status(id), await reconnect.status(id)]) {
+    assert.equal(restored.status, 'incompatible')
+    assert.equal(restored.reason, 'incompatible')
+    assert.equal(restored.operation, id)
+    assert.deepEqual(restored.requirements, unmet)
+  }
+  const freshLoad = new Updates(() => manager, dir, '0.2.0', runtime, fetchArchive)
+  const restoredWithoutReceipt = await freshLoad.status()
+  assert.equal(restoredWithoutReceipt.status, 'incompatible')
+  assert.deepEqual(restoredWithoutReceipt.requirements, unmet)
+  assert.equal(calls.length, 0)
 })
 test('A busy refusal clears the unadmitted Client ID before reconciling the Host operation', async () => {
   let count = 0
@@ -242,6 +333,30 @@ test('An unadmitted profile refusal clears the newly stored Client operation ID'
   const storage = memoryStorage()
   const controller = new UpdateController({ rpc: { call: async (_base, method) => method.endsWith('update-install') ? { ok: false, error: { code: 'updater/profile-changed' } } : { ok: true, value: clientView({ status: 'available', candidate: { id: 'fixture', version, url: `https://github.com/${REPOSITORY}/releases/tag/${tag}`, runtime, notes: '' } }) } } }, storage)
   await controller.status(); await controller.install(); assert.equal(storage.entries.size, 0); assert.equal(controller.getSnapshot().status, 'failed'); controller.dispose()
+})
+test('A pre-admission incompatibility clears the Client ID and reload reconciles without an unknown receipt', async () => {
+  const storage = memoryStorage(), requests = []
+  const candidate = { id: 'fixture', version, url: `https://github.com/${REPOSITORY}/releases/tag/${tag}`, runtime, notes: '' }
+  const rpc = { call: async (_base, method, payload) => {
+    requests.push({ method, payload })
+    if (method.endsWith('update-install')) return { ok: true, value: clientView({ status: 'incompatible', reason: 'incompatible', requirements: { 'engines.dsh': '>=0.2.2 <0.3.0-0' } }) }
+    return { ok: true, value: clientView({ status: 'available', candidate }) }
+  } }
+  const controller = new UpdateController({ rpc }, storage)
+  await controller.status(); await controller.install()
+  assert.equal(controller.getSnapshot().status, 'incompatible')
+  assert.deepEqual(controller.getSnapshot().requirements, { 'engines.dsh': '>=0.2.2 <0.3.0-0' })
+  assert.equal(storage.entries.size, 0)
+  const nextRequests = []
+  const reloaded = new UpdateController({ rpc: { call: async (_base, method, payload) => {
+    nextRequests.push({ method, payload })
+    return { ok: true, value: clientView({ status: 'incompatible', reason: 'incompatible', requirements: { 'engines.dsh': '>=0.2.2 <0.3.0-0' } }) }
+  } } }, storage)
+  await reloaded.status()
+  assert.equal(nextRequests[0].payload.operationId, undefined)
+  assert.equal(reloaded.getSnapshot().status, 'incompatible')
+  assert.equal(requests.find(request => request.method.endsWith('update-install')).payload.operationId.length, 36)
+  controller.dispose(); reloaded.dispose()
 })
 test('Different or missing expected profile identity cannot admit an installation', async t => {
   const { updates, calls } = await fixture(t), checked = await updates.check()
