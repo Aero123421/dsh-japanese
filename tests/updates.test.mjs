@@ -87,6 +87,19 @@ test('the host-substituted evaluator decides instead of the local rule', async t
   assert.deepEqual(checked.requirements, { 'engines.dsh': '>=0.2.2 <0.3.0-0' })
   assert.equal(rejected.calls.length, 0)
 })
+test('an update that becomes incompatible during install revalidation shows the unmet requirement', async t => {
+  let evaluations = 0
+  const { updates, calls } = await fixture(t, {
+    evaluate: () => ++evaluations === 1 ? {} : { 'engines.dsh': '>=0.2.2 <0.3.0-0' },
+  })
+  const checked = await updates.check()
+  assert.equal(checked.status, 'available')
+  const result = await updates.install(checked.candidate.id, randomUUID(), updates.profileKey)
+  assert.equal(result.status, 'incompatible')
+  assert.equal(result.reason, 'incompatible')
+  assert.deepEqual(result.requirements, { 'engines.dsh': '>=0.2.2 <0.3.0-0' })
+  assert.equal(calls.length, 0)
+})
 test('Disabled bundle stays disabled; pin remains explicit; restart is not success; journal survives reload', async t => {
   const { updates, manager, dir, calls } = await fixture(t)
   const checked = await updates.check(), id = randomUUID()
@@ -203,11 +216,19 @@ test('A busy install rejects another operation ID and a check cannot masquerade 
   settle({ changed: false, application: 'failed', stage: 'install', target: PACKAGE }); await first
 })
 test('Matching checksums never admit an archive with the wrong package, version or dsh requirements', async t => {
-  for (const value of [{ ...manifest(), name: 'wrong-package' }, { ...manifest(), version: '0.2.0' }, { ...manifest(), peerDependencies: { '@deepseek-ai/dsh-web': '99.0.0' } }, { ...manifest(), engines: { dsh: '>=0.2.2 <0.3.0-0' } }]) {
+  const invalid = [
+    { value: { ...manifest(), name: 'wrong-package' }, status: 'failed' },
+    { value: { ...manifest(), version: '0.2.0' }, status: 'failed' },
+    { value: { ...manifest(), peerDependencies: { '@deepseek-ai/dsh-web': '99.0.0' } }, status: 'incompatible', requirements: { '@deepseek-ai/dsh-web': '99.0.0' } },
+    { value: { ...manifest(), engines: { dsh: '>=0.2.2 <0.3.0-0' } }, status: 'incompatible', requirements: { 'engines.dsh': '>=0.2.2 <0.3.0-0' } },
+  ]
+  for (const { value, status, requirements } of invalid) {
     const wrong = archive(value), normal = fetcher()
     const { updates, calls } = await fixture(t, { bundle: { source: 'file:/downloads/local-dsh-japanese-0.2.0.tgz' }, fetcher: async url => String(url).endsWith('SHA256SUMS') ? new Response(`${createHash('sha256').update(wrong).digest('hex')}  ${filename}\n`) : String(url).endsWith(filename) ? new Response(wrong) : normal(url) })
     const checked = await updates.check()
-    assert.equal((await updates.install(checked.candidate.id, randomUUID(), updates.profileKey)).status, 'failed')
+    const result = await updates.install(checked.candidate.id, randomUUID(), updates.profileKey)
+    assert.equal(result.status, status)
+    if (requirements) assert.deepEqual(result.requirements, requirements)
     assert.equal(calls.length, 0)
   }
 })

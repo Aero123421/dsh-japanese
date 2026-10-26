@@ -2407,7 +2407,9 @@ var Updates = class {
           await this.save().catch(() => {
           });
         }
-        return this.failOrRestore(error, this.operation && !this.operation.result ? "unknown" : "failed");
+        const incompatible = !started && error instanceof Error && error.message === "incompatible";
+        const requirements = incompatible && "requirements" in error ? error.requirements : void 0;
+        return this.failOrRestore(error, incompatible ? "incompatible" : this.operation && !this.operation.result ? "unknown" : "failed", requirements);
       }
     })().finally(() => {
       this.pending = void 0;

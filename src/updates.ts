@@ -300,7 +300,9 @@ export class Updates {
           this.operation.result = { changed: false, application: 'failed', target: PACKAGE, stage: 'install', error: { code: 'operation-error' } }
           await this.save().catch(() => {})
         }
-        return this.failOrRestore(error, this.operation && !this.operation.result ? 'unknown' : 'failed')
+        const incompatible = !started && error instanceof Error && error.message === 'incompatible'
+        const requirements = incompatible && 'requirements' in error ? (error as { requirements: Record<string, string> }).requirements : undefined
+        return this.failOrRestore(error, incompatible ? 'incompatible' : this.operation && !this.operation.result ? 'unknown' : 'failed', requirements)
       }
     })().finally(() => { this.pending = undefined; this.pendingOperation = undefined })
     return this.pending
