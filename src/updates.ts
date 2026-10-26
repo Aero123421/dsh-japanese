@@ -18,7 +18,7 @@ export interface Manager {
 }
 export type UpdateStatus = 'idle' | 'available' | 'current' | 'unavailable' | 'incompatible' | 'checking' | 'installing' | 'unknown' | 'restart-required' | 'applied' | 'overridden' | 'failed' | 'cancelled'
 interface Candidate { id: string; version: string; tag: string; notes: string; url: string; runtime: string; filename: string; tarball: string; checksum: string }
-interface Operation { id: string; version: string; result?: ChangeResult }
+interface Operation { id: string; version: string; result?: ChangeResult; requirements?: Record<string, string> }
 export interface UpdateView { status: UpdateStatus; running: string; profileKey: string | null; installed?: string; candidate?: Candidate; operation?: string; reason?: string; stage?: string; requirements?: Record<string, string>; checkedAt?: string }
 
 // Explicit GitHub tags remain explicit. Release filenames classify the local
@@ -161,7 +161,7 @@ export class Updates {
     if ((await lstat(join(this.dir!, '.dsh-japanese-update'))).isSymbolicLink()) throw new Error('storage')
     const temp = `${path}.${randomUUID()}.tmp`
     // This journal holds no configuration, API keys, paths, or installer output.
-    await writeFile(temp, JSON.stringify({ id: this.operation!.id, version: this.operation!.version, ...(this.operation!.result ? { result: { bundle: this.operation!.result.bundle, application: this.operation!.result.application, version: this.operation!.result.version, stage: this.operation!.result.stage, error: this.operation!.result.error ? { code: this.operation!.result.error.code } : undefined } } : {}) }), { mode: 0o600, flag: 'wx' })
+    await writeFile(temp, JSON.stringify({ id: this.operation!.id, version: this.operation!.version, ...(this.operation!.requirements ? { requirements: this.operation!.requirements } : {}), ...(this.operation!.result ? { result: { bundle: this.operation!.result.bundle, application: this.operation!.result.application, version: this.operation!.result.version, stage: this.operation!.result.stage, error: this.operation!.result.error ? { code: this.operation!.result.error.code } : undefined } } : {}) }), { mode: 0o600, flag: 'wx' })
     await rename(temp, path)
   }
   private async bundle(): Promise<BundleInfo> {
@@ -204,6 +204,11 @@ export class Updates {
     const value = record(JSON.parse(await readFile(this.path(), 'utf8')))
     if (typeof value.id !== 'string' || !/^[0-9a-f-]{36}$/.test(value.id) || typeof value.version !== 'string' || !semver.valid(value.version)) throw new Error('journal')
     const operation: Operation = { id: value.id, version: value.version }
+    if (value.requirements !== undefined) {
+      const requirements = record(value.requirements)
+      if (Object.values(requirements).some(requirement => typeof requirement !== 'string')) throw new Error('journal')
+      operation.requirements = requirements as Record<string, string>
+    }
     if (value.result) {
       const result = record(value.result)
       if (!['applied', 'restart-required', 'overridden', 'failed', 'cancelled'].includes(String(result.application)) || !['install', 'enable', 'remove'].includes(String(result.stage))) throw new Error('journal')
@@ -225,13 +230,15 @@ export class Updates {
   private result(result: ChangeResult, installed?: string): UpdateView {
     const operation = this.operation!
     let status: UpdateStatus = result.application
-    if (result.application === 'failed' || (['applied', 'restart-required'].includes(result.application) && (result.error || result.packageResult && (result.packageResult.exitCode !== 0 || result.packageResult.timedOut)))) status = 'failed'
+    const code = changeCode(result)
+    if (code === 'incompatible-version') status = 'incompatible'
+    else if (result.application === 'failed' || (['applied', 'restart-required'].includes(result.application) && (result.error || result.packageResult && (result.packageResult.exitCode !== 0 || result.packageResult.timedOut)))) status = 'failed'
     else if (result.application === 'applied' || result.application === 'restart-required') {
       if (result.bundle !== PACKAGE || result.version !== operation.version || installed !== operation.version) status = 'unknown'
       else status = this.running === operation.version ? 'applied' : 'restart-required'
     }
-    const { reason: _reason, ...previous } = this.view
-    this.view = { ...previous, status, operation: this.operation!.id, stage: result.stage, ...(result.error ? { reason: result.error.code } : {}) }; return this.view
+    const { reason: _reason, requirements: _requirements, ...previous } = this.view
+    this.view = { ...previous, status, operation: this.operation!.id, stage: result.stage, ...(code === 'incompatible-version' ? { reason: 'incompatible' } : result.error ? { reason: result.error.code } : {}), ...(operation.requirements ? { requirements: operation.requirements } : {}) }; return this.view
   }
   check(): Promise<UpdateView> {
     if (this.pending) return this.pending
@@ -296,12 +303,13 @@ export class Updates {
         try { installed = (await this.bundle()).version } catch { /* The replacement may have unloaded this plugin. */ }
         return this.result(result, installed)
       } catch (error) {
-        if (admitted && this.operation && this.operation.id === operationId && !this.operation.result && !started) {
-          this.operation.result = { changed: false, application: 'failed', target: PACKAGE, stage: 'install', error: { code: 'operation-error' } }
-          await this.save().catch(() => {})
-        }
         const incompatible = !started && error instanceof Error && error.message === 'incompatible'
         const requirements = incompatible && 'requirements' in error ? (error as { requirements: Record<string, string> }).requirements : undefined
+        if (admitted && this.operation && this.operation.id === operationId && !this.operation.result && !started) {
+          this.operation.result = incompatible ? refusal('failed', 'incompatible-version') : { changed: false, application: 'failed', target: PACKAGE, stage: 'install', error: { code: 'operation-error' } }
+          if (requirements) this.operation.requirements = requirements
+          await this.save().catch(() => {})
+        }
         return this.failOrRestore(error, incompatible ? 'incompatible' : this.operation && !this.operation.result ? 'unknown' : 'failed', requirements)
       }
     })().finally(() => { this.pending = undefined; this.pendingOperation = undefined })

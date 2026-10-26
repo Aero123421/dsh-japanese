@@ -2245,7 +2245,7 @@ var Updates = class {
     await mkdir(join(this.dir, ".dsh-japanese-update"), { recursive: true, mode: 448 });
     if ((await lstat(join(this.dir, ".dsh-japanese-update"))).isSymbolicLink()) throw new Error("storage");
     const temp = `${path}.${randomUUID()}.tmp`;
-    await writeFile(temp, JSON.stringify({ id: this.operation.id, version: this.operation.version, ...this.operation.result ? { result: { bundle: this.operation.result.bundle, application: this.operation.result.application, version: this.operation.result.version, stage: this.operation.result.stage, error: this.operation.result.error ? { code: this.operation.result.error.code } : void 0 } } : {} }), { mode: 384, flag: "wx" });
+    await writeFile(temp, JSON.stringify({ id: this.operation.id, version: this.operation.version, ...this.operation.requirements ? { requirements: this.operation.requirements } : {}, ...this.operation.result ? { result: { bundle: this.operation.result.bundle, application: this.operation.result.application, version: this.operation.result.version, stage: this.operation.result.stage, error: this.operation.result.error ? { code: this.operation.result.error.code } : void 0 } } : {} }), { mode: 384, flag: "wx" });
     await rename(temp, path);
   }
   async bundle() {
@@ -2300,6 +2300,11 @@ var Updates = class {
     const value = record(JSON.parse(await readFile(this.path(), "utf8")));
     if (typeof value.id !== "string" || !/^[0-9a-f-]{36}$/.test(value.id) || typeof value.version !== "string" || !import_semver.default.valid(value.version)) throw new Error("journal");
     const operation = { id: value.id, version: value.version };
+    if (value.requirements !== void 0) {
+      const requirements = record(value.requirements);
+      if (Object.values(requirements).some((requirement) => typeof requirement !== "string")) throw new Error("journal");
+      operation.requirements = requirements;
+    }
     if (value.result) {
       const result = record(value.result);
       if (!["applied", "restart-required", "overridden", "failed", "cancelled"].includes(String(result.application)) || !["install", "enable", "remove"].includes(String(result.stage))) throw new Error("journal");
@@ -2324,13 +2329,15 @@ var Updates = class {
   result(result, installed) {
     const operation = this.operation;
     let status = result.application;
-    if (result.application === "failed" || ["applied", "restart-required"].includes(result.application) && (result.error || result.packageResult && (result.packageResult.exitCode !== 0 || result.packageResult.timedOut))) status = "failed";
+    const code = changeCode(result);
+    if (code === "incompatible-version") status = "incompatible";
+    else if (result.application === "failed" || ["applied", "restart-required"].includes(result.application) && (result.error || result.packageResult && (result.packageResult.exitCode !== 0 || result.packageResult.timedOut))) status = "failed";
     else if (result.application === "applied" || result.application === "restart-required") {
       if (result.bundle !== PACKAGE || result.version !== operation.version || installed !== operation.version) status = "unknown";
       else status = this.running === operation.version ? "applied" : "restart-required";
     }
-    const { reason: _reason, ...previous } = this.view;
-    this.view = { ...previous, status, operation: this.operation.id, stage: result.stage, ...result.error ? { reason: result.error.code } : {} };
+    const { reason: _reason, requirements: _requirements, ...previous } = this.view;
+    this.view = { ...previous, status, operation: this.operation.id, stage: result.stage, ...code === "incompatible-version" ? { reason: "incompatible" } : result.error ? { reason: result.error.code } : {}, ...operation.requirements ? { requirements: operation.requirements } : {} };
     return this.view;
   }
   check() {
@@ -2402,13 +2409,14 @@ var Updates = class {
         }
         return this.result(result, installed);
       } catch (error) {
+        const incompatible = !started && error instanceof Error && error.message === "incompatible";
+        const requirements = incompatible && "requirements" in error ? error.requirements : void 0;
         if (admitted && this.operation && this.operation.id === operationId && !this.operation.result && !started) {
-          this.operation.result = { changed: false, application: "failed", target: PACKAGE, stage: "install", error: { code: "operation-error" } };
+          this.operation.result = incompatible ? refusal("failed", "incompatible-version") : { changed: false, application: "failed", target: PACKAGE, stage: "install", error: { code: "operation-error" } };
+          if (requirements) this.operation.requirements = requirements;
           await this.save().catch(() => {
           });
         }
-        const incompatible = !started && error instanceof Error && error.message === "incompatible";
-        const requirements = incompatible && "requirements" in error ? error.requirements : void 0;
         return this.failOrRestore(error, incompatible ? "incompatible" : this.operation && !this.operation.result ? "unknown" : "failed", requirements);
       }
     })().finally(() => {

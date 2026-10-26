@@ -232,6 +232,35 @@ test('Matching checksums never admit an archive with the wrong package, version 
     assert.equal(calls.length, 0)
   }
 })
+test('A tarball compatibility refusal survives a lost reply, reconnect and fresh journal load', async t => {
+  const unmet = { 'engines.dsh': '>=0.2.2 <0.3.0-0' }
+  const wrong = archive({ ...manifest(), engines: { dsh: unmet['engines.dsh'] } }), normal = fetcher()
+  const fetchArchive = async url => String(url).endsWith('SHA256SUMS')
+    ? new Response(`${createHash('sha256').update(wrong).digest('hex')}  ${filename}\n`)
+    : String(url).endsWith(filename) ? new Response(wrong) : normal(url)
+  const { updates, manager, dir, calls } = await fixture(t, { bundle: { source: 'file:/downloads/local-dsh-japanese-0.2.0.tgz' }, fetcher: fetchArchive })
+  const checked = await updates.check(), id = randomUUID()
+  assert.equal(checked.status, 'available', 'the raw release manifest remains compatible')
+
+  // The install reply can be lost after the host has persisted its refusal.
+  const reply = await updates.install(checked.candidate.id, id, updates.profileKey)
+  assert.equal(reply.status, 'incompatible')
+  assert.deepEqual(reply.requirements, unmet)
+  assert.equal(calls.length, 0)
+
+  const reconnect = new Updates(() => manager, dir, '0.2.0', runtime, fetchArchive)
+  for (const restored of [await updates.status(id), await reconnect.status(id)]) {
+    assert.equal(restored.status, 'incompatible')
+    assert.equal(restored.reason, 'incompatible')
+    assert.equal(restored.operation, id)
+    assert.deepEqual(restored.requirements, unmet)
+  }
+  const freshLoad = new Updates(() => manager, dir, '0.2.0', runtime, fetchArchive)
+  const restoredWithoutReceipt = await freshLoad.status()
+  assert.equal(restoredWithoutReceipt.status, 'incompatible')
+  assert.deepEqual(restoredWithoutReceipt.requirements, unmet)
+  assert.equal(calls.length, 0)
+})
 test('A busy refusal clears the unadmitted Client ID before reconciling the Host operation', async () => {
   let count = 0
   const controller = new UpdateController({ rpc: { call: async (_base, method, payload) => {
@@ -304,6 +333,30 @@ test('An unadmitted profile refusal clears the newly stored Client operation ID'
   const storage = memoryStorage()
   const controller = new UpdateController({ rpc: { call: async (_base, method) => method.endsWith('update-install') ? { ok: false, error: { code: 'updater/profile-changed' } } : { ok: true, value: clientView({ status: 'available', candidate: { id: 'fixture', version, url: `https://github.com/${REPOSITORY}/releases/tag/${tag}`, runtime, notes: '' } }) } } }, storage)
   await controller.status(); await controller.install(); assert.equal(storage.entries.size, 0); assert.equal(controller.getSnapshot().status, 'failed'); controller.dispose()
+})
+test('A pre-admission incompatibility clears the Client ID and reload reconciles without an unknown receipt', async () => {
+  const storage = memoryStorage(), requests = []
+  const candidate = { id: 'fixture', version, url: `https://github.com/${REPOSITORY}/releases/tag/${tag}`, runtime, notes: '' }
+  const rpc = { call: async (_base, method, payload) => {
+    requests.push({ method, payload })
+    if (method.endsWith('update-install')) return { ok: true, value: clientView({ status: 'incompatible', reason: 'incompatible', requirements: { 'engines.dsh': '>=0.2.2 <0.3.0-0' } }) }
+    return { ok: true, value: clientView({ status: 'available', candidate }) }
+  } }
+  const controller = new UpdateController({ rpc }, storage)
+  await controller.status(); await controller.install()
+  assert.equal(controller.getSnapshot().status, 'incompatible')
+  assert.deepEqual(controller.getSnapshot().requirements, { 'engines.dsh': '>=0.2.2 <0.3.0-0' })
+  assert.equal(storage.entries.size, 0)
+  const nextRequests = []
+  const reloaded = new UpdateController({ rpc: { call: async (_base, method, payload) => {
+    nextRequests.push({ method, payload })
+    return { ok: true, value: clientView({ status: 'incompatible', reason: 'incompatible', requirements: { 'engines.dsh': '>=0.2.2 <0.3.0-0' } }) }
+  } } }, storage)
+  await reloaded.status()
+  assert.equal(nextRequests[0].payload.operationId, undefined)
+  assert.equal(reloaded.getSnapshot().status, 'incompatible')
+  assert.equal(requests.find(request => request.method.endsWith('update-install')).payload.operationId.length, 36)
+  controller.dispose(); reloaded.dispose()
 })
 test('Different or missing expected profile identity cannot admit an installation', async t => {
   const { updates, calls } = await fixture(t), checked = await updates.check()

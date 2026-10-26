@@ -57,7 +57,10 @@ export class UpdateController {
         // The Host latest receipt wins; browser storage only recovers a lost first reply.
         if (view.operation) this.remember(view.operation)
         else if (method === 'status' && !payload.operationId && this.operation && view.status !== 'unavailable') return await this.call('status', { operationId: this.operation })
-        else if (method === 'install' && view.status === 'failed') this.remember()
+        // A successful RPC response without an operation is an admission
+        // refusal. The ID was stored before sending the request, so discard it
+        // for every such outcome, including incompatibility and cancellation.
+        else if (method === 'install') this.remember()
         this.publish(view)
       }
     } catch { if (generation === this.generation) this.publish({ ...this.view, status: method === 'install' || this.view.operation ? 'unknown' : 'failed', reason: 'connection' }) }
