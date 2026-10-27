@@ -14,7 +14,7 @@ export function UpdatePage({ updates, locale }) {
     <h2>{t('title')}</h2>
     <p>{t('running')}: {view.running}{view.installed && view.installed !== view.running ? ` · ${t('installed')}: ${view.installed}` : ''}</p>
     <div role="status">
-      <p>{t(view.status)}{view.reason && view.reason !== 'restore-failed' && view.reason !== view.status && <span> · {t(view.reason in en ? view.reason : 'other')}</span>}{view.requirements && <span> · {Object.entries(view.requirements).map(([field, range]) => `${field} ${range}`).join(' · ')}</span>}{view.stage && view.reason !== 'restore-failed' && <span> · {t('stage')}: {view.stage}</span>}</p>
+      <p>{t(view.status)}{view.reason && view.reason !== 'restore-failed' && view.reason !== view.status && <span> · {t(view.reason in en ? view.reason : 'other')}</span>}{view.requirements && <span> · {Object.entries(view.requirements).map(([field, range]) => `${field} ${range}`).join(' · ')}</span>}{view.stage && view.reason !== 'restore-failed' && <span> · {t('stage')}: {`stage-${view.stage}` in en ? t(`stage-${view.stage}`) : view.stage}</span>}</p>
       {view.reason === 'restore-failed' && <><p>{t('restore-failed')}</p><p className="dsh-japanese-update-command">{t('restore-failed-command')}</p></>}
     </div>
     {view.checkedAt && <p className="dsh-japanese-update-muted">{t('checked')}: {new Date(view.checkedAt).toLocaleString()}</p>}
