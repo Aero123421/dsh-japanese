@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import vm from 'node:vm'
 const require = createRequire(import.meta.url)
-test('Without slots/connection the built Client still owns only its dictionaries and font style', async () => {
+for (const nativeJapanese of [false, true]) test(`Without slots/connection the built Client preserves language and font ownership (native Japanese: ${nativeJapanese})`, async () => {
   let factory
   const foreignStyle = { foreign: true }, styles = [foreignStyle], disposers = [], injections = [], registrations = []
   const document = { documentElement: { lang: 'ja' }, createElement: () => ({ dataset: {}, textContent: '', remove() { styles.splice(styles.indexOf(this), 1) } }), head: { append: node => styles.push(node) } }
@@ -12,10 +12,11 @@ test('Without slots/connection the built Client still owns only its dictionaries
   const plugin = factory(require)
   assert.deepEqual([...plugin.inject], ['locale'])
   let active = 'en'
-  const ctx = { inject: deps => injections.push([...deps]), effect: callback => disposers.push(callback()), locale: { getSnapshot: () => ({ active, locales: [{ id: 'en' }, { id: 'ja' }] }), subscribe: () => () => {}, addLanguage: () => { throw new Error('Existing Japanese language must not be replaced') }, register: (namespace, language) => { registrations.push({ namespace, language }); return () => {} } } }
+  let locales = [{ id: 'en' }, ...(nativeJapanese ? [{ id: 'ja' }] : [])]
+  const ctx = { inject: deps => injections.push([...deps]), effect: callback => disposers.push(callback()), locale: { getSnapshot: () => ({ active, locales }), subscribe: () => () => {}, addLanguage: definition => { assert.equal(nativeJapanese, false, 'existing Japanese language must not be replaced'); locales = [...locales, definition]; return () => { locales = locales.filter(locale => locale !== definition) } }, register: (namespace, language) => { registrations.push({ namespace, language }); return () => {} } } }
   plugin.apply(ctx)
   assert.deepEqual(injections, [['slots', 'connection']])
-  assert.ok(registrations.length >= 50)
+  assert.ok(nativeJapanese ? registrations.length === 0 : registrations.length >= 50)
   assert.ok(registrations.every(entry => entry.language === 'ja'))
   assert.equal(styles.length, 2); assert.equal(active, 'en')
   assert.match(styles[1].textContent, /var\(--dsh-font-family-text,/)
