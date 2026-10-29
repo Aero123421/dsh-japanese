@@ -10,20 +10,25 @@ function catalog() {
     added: [],
     snapshot: () => locales.map(locale => ({ ...locale })),
     locale: {
-      getSnapshot: () => ({ locales: locales.map(locale => ({ ...locale })) }),
+      getSnapshot: () => ({ locales: [...locales] }),
       subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener) },
       addLanguage: definition => {
         if (locales.some(locale => locale.id === definition.id)) throw new Error(`${definition.id} is already registered`)
-        locales = [...locales, { id: definition.id, label: definition.label }]
+        const entry = { ...definition }
+        locales = [...locales, entry]
         publish()
         return () => {
-          locales = locales.filter(locale => locale.id !== definition.id)
+          locales = locales.filter(locale => locale !== entry)
           publish()
         }
       },
     },
     drop(id) {
       locales = locales.filter(locale => locale.id !== id)
+      publish()
+    },
+    replace(definition) {
+      locales = [...locales.filter(locale => locale.id !== definition.id), { ...definition }]
       publish()
     },
   }
@@ -47,4 +52,28 @@ test('this plugin does not replace ja it did not register, and does not restore 
   assert.equal(host.snapshot()[0].label, 'other')
   stop()
   assert.equal(host.snapshot()[0].label, 'other')
+})
+
+test('dictionaries follow language ownership through late acquisition, replacement, and unload', () => {
+  const host = catalog()
+  let acquisitions = 0, releases = 0
+  const other = host.locale.addLanguage({ id: 'ja', label: 'DSH Japanese', fallback: 'en' })
+  const stop = watchJapaneseLanguage({ locale: host.locale }, () => {
+    acquisitions++
+    return () => { releases++ }
+  })
+  assert.equal(acquisitions, 0, 'existing Japanese provider keeps all dictionaries')
+  other()
+  assert.equal(acquisitions, 1, 'acquire dictionaries after the provider disappears')
+  host.replace({ id: 'ja', label: 'replacement', fallback: 'en' })
+  assert.equal(releases, 1, 'release our dictionaries on language replacement')
+  assert.equal(host.snapshot()[0].label, 'replacement')
+  host.drop('ja')
+  assert.equal(acquisitions, 2)
+  stop()
+  stop()
+  assert.equal(releases, 2)
+  assert.deepEqual(host.snapshot(), [])
+  host.locale.addLanguage({ id: 'ja', label: 'after unload', fallback: 'en' })
+  assert.equal(acquisitions, 2, 'unloaded pack must not reacquire dictionaries')
 })
