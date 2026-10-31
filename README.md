@@ -12,7 +12,7 @@ DeepSeek Harnessの画面を日本語にするプラグインです。日本語�
 github:Aero123421/dsh-japanese
 ```
 
-「Install」→「Enable now」を押し、アプリを再起動します。ビルド済みのファイルとフォントを含むため、インストール時のビルドは不要です。特定の版を使う場合は[配布ファイルとチェックサム](https://github.com/Aero123421/dsh-japanese/releases/tag/v0.2.3)を使えます。
+「Install」→「Enable now」を押し、アプリを再起動します。ビルド済みのファイルとフォントを含むため、インストール時のビルドは不要です。特定の版を使う場合は[配布ファイルとチェックサム](https://github.com/Aero123421/dsh-japanese/releases/tag/v0.2.4)を使えます。
 
 「設定 → 一般 → 言語」で「日本語」を選びます。保存済みの言語設定やブラウザの言語検出は引き続き使えます。プラグイン更新後はアプリを再起動してください。
 
@@ -59,7 +59,7 @@ dsh plugin --profile web add -w github:Aero123421/dsh-japanese
 plugin managerがない構成、読み取り専用、開発ディレクトリ等では手動更新先を表示します。slotsやconnectionがない構成でも辞書とフォントは動作します。このパックをOFFにすると専用画面も消えるため、DSH標準の「設定 → プラグイン」または次のCLIで更新してください。元がOFFの場合は、更新後に標準画面でOFF状態を確認してください。
 
 ```sh
-dsh plugin --profile web add -w github:Aero123421/dsh-japanese#v0.2.3
+dsh plugin --profile web add -w github:Aero123421/dsh-japanese#v0.2.4
 ```
 
 画面からの更新はOFF状態を維持します。CLIの`add`は導入時の有効化を行うため、OFFを維持する必要がある場合はDSH標準のplugin managerから更新してください。
