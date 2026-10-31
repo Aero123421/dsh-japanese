@@ -26,7 +26,7 @@ test('missing Japanese keys fall back to English, and one rejected namespace doe
   }
   try {
     ctx.locale.register('chat', 'en', { title: 'Chat', fresh: 'New setting' })
-    registerJapaneseDictionaries(ctx, {
+    const stop = registerJapaneseDictionaries(ctx, {
       chat: { title: 'チャット' },
       broken: { title: '壊れた辞書' },
       workspace: { empty: '空' },
@@ -39,5 +39,9 @@ test('missing Japanese keys fall back to English, and one rejected namespace doe
     assert.equal(dicts.has('broken'), false)
     assert.equal(dicts.has('bad'), false)
     assert.match(errors.join('\n'), /skipped Japanese dictionary broken/)
+    stop()
+    stop()
+    assert.equal(ctx.locale.translate('chat', 'title'), 'Chat')
+    assert.equal(ctx.locale.translate('workspace', 'empty'), 'empty')
   } finally { console.error = original }
 })

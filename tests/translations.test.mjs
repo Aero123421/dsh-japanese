@@ -3,14 +3,16 @@ import assert from 'node:assert/strict'
 import { readFile, readdir } from 'node:fs/promises'
 
 const contract = JSON.parse(await readFile(new URL('./fixtures/upstream-dictionaries.json', import.meta.url), 'utf8'))
+const rc4 = JSON.parse(await readFile(new URL('./fixtures/en-by-version/0.2.1-rc.4.json', import.meta.url), 'utf8'))
 const versions = [
   ['0.2.1-alpha.2', JSON.parse(await readFile(new URL('./fixtures/en-by-version/0.2.1-alpha.2.json', import.meta.url), 'utf8'))],
   ['0.2.1-alpha.3', JSON.parse(await readFile(new URL('./fixtures/en-by-version/0.2.1-alpha.3.json', import.meta.url), 'utf8'))],
   ['0.2.1-rc.2', contract],
+  ['0.2.1-rc.4', rc4],
 ]
 const placeholders = text => [...text.matchAll(/\{([A-Za-z][\w.]*)\}/g)].map(match => match[1]).sort()
-test('all pinned official UI keys and placeholders have Japanese translations', async () => {
-  for (const [namespace, english] of Object.entries(contract)) {
+test('all official rc.4 UI keys have Japanese translations', async () => {
+  for (const [namespace, english] of Object.entries(rc4)) {
     const japanese = JSON.parse(await readFile(new URL(`../translations/${namespace}.json`, import.meta.url), 'utf8'))
     assert.deepEqual(Object.keys(japanese).sort(), Object.keys(english).sort(), namespace)
     for (const [key, text] of Object.entries(english)) {
@@ -32,7 +34,7 @@ test('Japanese command tokens match the English tokens', async () => {
 test('Japanese text matches English only for keys on the allowlist', async () => {
   const allowlist = JSON.parse(await readFile(new URL('./fixtures/english-identical-allowlist.json', import.meta.url), 'utf8'))
   const identical = []
-  for (const [namespace, english] of Object.entries(contract)) {
+  for (const [namespace, english] of Object.entries(rc4)) {
     const japanese = JSON.parse(await readFile(new URL(`../translations/${namespace}.json`, import.meta.url), 'utf8'))
     for (const [key, text] of Object.entries(english)) {
       if (japanese[key] === text) identical.push(`${namespace}.${key}`)
@@ -70,6 +72,7 @@ test('Japanese placeholders are valid in each supported version en dictionary', 
     ['0.2.1-alpha.2', ['peers', 'plugin', 'runtime']],
     ['0.2.1-alpha.3', ['peers', 'plugin', 'runtime']],
     ['0.2.1-rc.2', ['plugin', 'requirements', 'runtime']],
+    ['0.2.1-rc.4', ['plugin', 'requirements', 'runtime']],
   ])
   assert.deepEqual(placeholders(japanese.pluginManager.reasonIncompatibleVersion), ['plugin', 'runtime'])
 })

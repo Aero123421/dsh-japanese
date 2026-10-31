@@ -17,8 +17,7 @@ html:lang(ja) body {
 
 export function apply(ctx) {
   ctx.inject(['slots', 'connection'], child => registerUpdatePage(child))
-  ctx.effect(() => watchJapaneseLanguage(ctx), 'dsh-japanese: language')
-  registerJapaneseDictionaries(ctx, dictionaries)
+  ctx.effect(() => watchJapaneseLanguage(ctx, () => registerJapaneseDictionaries(ctx, dictionaries)), 'dsh-japanese: language')
   ctx.effect(() => {
     const style = document.createElement('style')
     style.dataset.dshJapanese = ''
