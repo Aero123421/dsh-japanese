@@ -366,6 +366,10 @@ test('Different or missing expected profile identity cannot admit an installatio
 })
 test('Update copy keeps the same English and Japanese keys', () => {
   assert.deepEqual(Object.keys(en).sort(), Object.keys(ja).sort())
+  for (const key of ['busy', 'stage-install', 'stage-enable', 'stage-remove']) {
+    assert.equal(typeof en[key], 'string', key)
+    assert.notEqual(ja[key], en[key], key)
+  }
 })
 const later = task => { queueMicrotask(() => { void task() }) }
 test('HMR already-installed removes on a later turn, then installs while staying disabled', async t => {
